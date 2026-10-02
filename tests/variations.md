@@ -15,7 +15,7 @@ Variations of the regtest scenarios. Status: `todo` unless noted. DB writers, ma
 | A7 | Two claims for coins of the same round in one tick, while a captaind round spends one of them |
 | A8 | Claim racing an arkoor cosign of the same coin (unexpired coin with `allow_expired_arkoor=true`) |
 | A9 | Claim racing Lightning send phase 1 (needs an LN channel on the stack) |
-| A10 | Claim racing an offboard `finish` whose `prepare` started before the ban |
+| A10 | Claim racing an offboard `finish` whose `prepare` started before the ban — pass for an offboard started during the ban wait: refused (`attack-ban-wait`) |
 | A11 | Held captaind spend tx (as #52), then rollback instead of commit: the claim must then win — pass (`race-held-lock`) |
 | A12 | Held claim tx (sidecar paused via a debugger), captaind spends meanwhile: captaind must fail |
 | A13 | Restart captaind mid-wait: does the ban survive (DB) and the wait continue? |
@@ -47,8 +47,8 @@ Variations of the regtest scenarios. Status: `todo` unless noted. DB writers, ma
 | --- | --- |
 | D1 | Payout of 1 coin vs 100 coins at the same feerate: per-output share |
 | D2 | Coin just above / at / below the computed floor |
-| D3 | Fee rule holds claimed coins for hours; then the fee drops |
-| D4 | Fee spikes between claim and pay (claimed coins wait) |
+| D3 | Fee rule holds claimed coins for hours; then the fee drops — pass (`fee-stuck-claim`) |
+| D4 | Fee spikes between claim and pay (claimed coins wait) — pass (`fee-stuck-claim`) |
 | D5 | 50 coins aggregated to one address plus 50 distinct addresses |
 | D6 | Payout wallet balance < batch total (partial pay? deferral) |
 | D7 | Payout wallet funded only with unconfirmed UTXOs |

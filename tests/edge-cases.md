@@ -34,7 +34,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | --- | --- | --- | --- |
 | 21 | Postgres down mid-tick | Tick errors, retried; no half state | pass: exits, supervisor restarts (`infra-postgres`) |
 | 22 | bitcoind down | Tick errors, retried | fixed: wallet checked every tick (`infra-bitcoind`) |
-| 23 | Payout wallet empty | Claims wait as `claimed`; no crash loop | pass |
+| 23 | Payout wallet empty | Claims wait as `claimed` (at most `max_batch` payable ones); no crash loop | pass |
 | 24 | Fee estimate spikes | The per-coin fee rule defers the batch | pass |
 | 25 | Watchman down for a long time | No sweep, so nothing paid | pass |
 | 26 | captaind upgraded (schema version changes) | Sidecar refuses to start | pass (`schema-version`) |
@@ -209,3 +209,26 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | J16 | barkd restarts between adopting the spent state and finding the payout | Spent state survives; the payout is found after the restart | todo |
 | J17 | Two devices on one seed sweep the same payout at the same time | One sweep confirms; the other device's history does not show money leaving twice | todo |
 | J18 | User receives a new payment to the same Ark address after an older coin there was paid out on-chain | New coin is a normal Ark coin; the old payout stays sweepable | todo |
+
+## Batch 15: "Partial control" (a malicious owner or client)
+
+The attacker holds some coins and runs any client; captaind, its DB and the sidecar host are trusted (`docs/design.md`).
+
+| # | Case | Expected | Status |
+| --- | --- | --- | --- |
+| 121 | Owner's small coin is claimed at a low fee rate; fees rise, it is no longer affordable and stays `claimed` | Other expired coins are still claimed and paid; the small one is paid when fees fall | fixed: a fee-stuck claimed coin blocked every new claim; now only payable claims count against `max_batch` (`fee-stuck-claim`) |
+| 122 | Owner arkoor-sends an expired, swept coin before the sidecar bans it | Refused (captaind refuses arkoor of expired coins unless `allow_expired_arkoor`); paid once; never more than the coin's amount for the coin and its children | pass: refused by the client and by captaind (`attack-ban-wait`) |
+| 123 | Owner arkoor-sends the coin during the ban wait | Refused; paid once | pass (`attack-ban-wait`) |
+| 124 | Owner offboards the coin during the ban wait | Refused ("banned until block"); paid once | pass (`attack-ban-wait`) |
+| 125 | Owner offboards an expired, swept coin before the ban | The offboard wins; the coin is never paid (`offboarded_in`, not spendable) | todo |
+| 126 | One owner's partial exit unrolls a round in which many other coins were abandoned | Those coins are quarantined; payouts of other rounds go on | fixed: each quarantined coin counted against `max_quarantine_per_tick`, so one exit stopped all payouts; one unrolled round now counts once (`exit-breaker`) |
+| 127 | Owner opens `max_batch` × 20 coins that wait forever at the front of the candidate window (unaffordable at today's fee) | Newer coins still progress | gap (as #62) |
+| 128 | Owner sends coins to a victim's Ark address (same key) | Victim's payout output carries the sum; nobody loses | pass: one output per address carrying the sum (`shared-address`) |
+| 129 | Owner splits value into coins each too small for the fee rule but affordable together on one key | Not claimed (the rule is per coin at claim time); they stay refreshable | pass: affordability is checked per coin before the ban (code) |
+| 130 | Owner refreshes one of two coins that share a key; the other is paid | Only the paid coin is listed with the payout; the sweep movement counts it once | gap: the bark fork lists the payout under every expired spent coin of the key, so the refreshed coin shows *Paid out* and the sweep movement subtracts its amount too; a spend recorded by adoption is not told apart from a refresh |
+| 131 | Client submits `refresh --all` with a banned coin and a fresh coin during the ban wait | Banned coin refused; the fresh coin can still be refreshed | todo |
+| 132 | Owner holds a delegated (`unclaimed`) output and claims it during the ban wait | The ban holds; the sidecar's claim or the owner's spend wins, never both | todo |
+| 133 | Client calls adopt-server-status on unexpired coins in a loop | Spent coins are marked spent; spendable ones unchanged; no payout effect | pass: adoption only copies the server's state (code) |
+| 134 | Client calls sweep-expiry-payouts from two barkds on one seed at once | One sweep confirms; the other is rejected or replaced; one movement per barkd | todo |
+| 135 | Owner exits a coin after the sidecar banned it, before the claim | Exit txs spend an already-swept funding output: invalid; coin paid once | n/a: the claim needs a sweep `sweep_min_confs` deep, after which exit txs are invalid (as X13) |
+| 136 | Owner with many claimed coins at a rising fee holds `max_batch` claimed rows | Unaffordable rows do not count against `max_batch` (as 121) | fixed (as 121) |
