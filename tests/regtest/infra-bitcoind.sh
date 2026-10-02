@@ -4,10 +4,7 @@
 # wallet comes back (load_on_startup) and the coin is paid.
 . "$(dirname "$0")/lib.sh"
 mkcfg
-W=$(wname a); newwallet "$W"
-round 60000 "$W"
-X=$(coins "$W"); read -r PK AMT <<< "$(coininfo "$W" "$X")"
-expire_and_sweep "$X" || finish
+expired_coin 60000
 nothing() {
 	check "$1: no ban" eq "$(bans "$X")" 0
 	check "$1: no claim" eq "$(payout_state "$X")" ""

@@ -152,6 +152,15 @@ for v in json.load(sys.stdin):
     if v['state']['type'] == '${2:-spendable}': print(v['id'])"
 }
 
+# expired_coin <sat>: a fresh wallet $W whose one round coin $X (key $PK,
+# amount $AMT) is expired and swept.
+expired_coin() {
+	W=$(wname a); newwallet "$W"
+	round "$1" "$W"
+	X=$(coins "$W"); read -r PK AMT <<< "$(coininfo "$W" "$X")"
+	expire_and_sweep "$X" || finish
+}
+
 # Ark address of a wallet.
 arkaddr() { bark "$1" address | tr -d '"[:space:]'; }
 
@@ -159,6 +168,7 @@ arkaddr() { bark "$1" address | tr -d '"[:space:]'; }
 # anchor (funding output) and the sweep is $SWEEP_CONFS deep.
 expire_and_sweep() { # expire_and_sweep <ids>
 	local ids=$1 inlist exp anchors a i spent
+	[ -n "${ids// /}" ] || { check "coins to expire" false; return 1; }
 	inlist=$(for i in $ids; do printf "'%s'," "$i"; done); inlist=${inlist%,}
 	exp=$(q "SELECT max(expiry) FROM vtxo WHERE vtxo_id IN ($inlist)")
 	anchors=$(q "SELECT DISTINCT anchor_point FROM vtxo WHERE vtxo_id IN ($inlist)")
@@ -193,8 +203,8 @@ spend_state() { q "SELECT spend_state FROM vtxo WHERE vtxo_id='$1'"; }
 quarantine_reason() { q "SELECT reason FROM sidecar.quarantine WHERE vtxo_id='$1'"; }
 bans() { q "SELECT count(*) FROM sidecar.ban WHERE vtxo_id='$1'"; }
 journaled() { grep -c "^$1 " "$JOURNAL"; }
-# Non-empty only when set.
 anchor_of() { q "SELECT anchor_point FROM vtxo WHERE vtxo_id='$1'"; }
+# Non-empty only when set.
 anchor_spender() { q "SELECT onchain_spent_txid FROM vtxo WHERE vtxo_id='$1' AND onchain_spent_txid IS NOT NULL"; }
 leaf_confirmed() { q "SELECT confirmed_height FROM vtxo WHERE vtxo_id='$1' AND confirmed_height IS NOT NULL"; }
 refreshed() { q "SELECT spent_in_round FROM vtxo WHERE vtxo_id='$1' AND spent_in_round IS NOT NULL"; }

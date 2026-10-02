@@ -6,10 +6,7 @@
 # - with our ban intact and aged: claimed and paid.
 . "$(dirname "$0")/lib.sh"
 mkcfg
-W=$(wname a); newwallet "$W"
-round 60000 "$W"
-X=$(coins "$W"); read -r PK AMT <<< "$(coininfo "$W" "$X")"
-expire_and_sweep "$X" || finish
+expired_coin 60000
 WAIT=$(( $(ban_wait) + 1 ))
 banned_at() { q "SELECT banned_at FROM sidecar.ban WHERE vtxo_id='$X'"; }
 no_claim() { check "$1: no claim" eq "$(payout_state "$X")" ""; check "$1: coin spendable" eq "$(spend_state "$X")" spendable; }

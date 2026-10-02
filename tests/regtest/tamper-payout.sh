@@ -4,11 +4,8 @@
 # - a paid row deleted            -> the coin is spent: no repay.
 . "$(dirname "$0")/lib.sh"
 mkcfg
-W=$(wname a); newwallet "$W"
-round 80000 "$W"
-X=$(coins "$W"); read -r PK AMT <<< "$(coininfo "$W" "$X")"
+expired_coin 80000
 TRA=$(tr_address "$PK")
-expire_and_sweep "$X" || finish
 check "paid" pay_until "$X" 3
 assert_paid "$X" "$PK" "$AMT"
 confirm_payouts

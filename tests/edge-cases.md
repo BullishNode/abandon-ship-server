@@ -161,7 +161,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | 111 | captaind upgrade changes the VTXO encoding | Decode fails → quarantine; schema guard first | todo |
 | 112 | captaind adds a new spend path that is not conditional | Upgrade-gate audit | todo |
 | 113 | captaind adds a fallback refresh: re-issue and payout both happen | Must disable the sidecar or teach it re-issued coins | todo |
-| 114 | Very long downtime of the sidecar (months) | Catches up in batches | pass: catches up oldest first, `max_batch` per tick; a lapsed ban is re-set (`ban-lapse`, `fee-window`) |
+| 114 | Very long downtime of the sidecar (months) | Catches up in batches | pass: catches up oldest first, `max_batch` per tick; a lapsed ban is re-set (`race-operator-unban`, `fee-window`) |
 | 115 | Block height near i32 max for bans | Bounded | pass (`ban_blocks` ≤ 10000) |
 | 116 | Taproot address format changes / new network | Network-typed addresses | todo |
 | 117 | User wallet from another Ark client (not Bark) with a different key derivation | Paid to the coin's key regardless | todo |
@@ -239,7 +239,7 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 | --- | --- | --- | --- |
 | 137 | More than `max_batch` × 20 coins unaffordable at today's fee expire before a payable coin (arkoor sends split change into many small coins) | The payable coin is still claimed | fixed: unaffordable coins are filtered before the candidate limit (`fee-window`) |
 | 138 | A coin after 21 arkoor sends from one wallet expires | Paid like any other | pass (`fee-window`) |
-| 139 | The sidecar bans a coin, then is down longer than `ban_blocks` | Ban lapses; on return it re-bans and waits the full ban wait; paid once | pass (`ban-lapse`) |
+| 139 | The sidecar bans a coin, then is down longer than `ban_blocks` | Ban lapses; on return it re-bans and waits the full ban wait; paid once | pass (`race-operator-unban`) |
 | 140 | The sidecar restarts between every step (ban, wait, claim, build, broadcast, confirm) | Paid once | pass (every scenario runs one process per tick, `--once`) |
 | 141 | Thousands of coins paid over months: each batch tx was journaled once per coin and every tick read every ledger row's raw tx | Journal and per-tick reads grow linearly with payouts, not with payouts × batch size | fixed: raw tx journaled once per tx; reconciliation reads ids and txids only (`happy-batch`, `crash-signed`, `db-restore`) |
 | 142 | Every ledger row stores the whole batch tx (`raw_tx` per coin) | DB size grows by `max_batch` copies per batch | gap: storage only; no read path loads them per row |

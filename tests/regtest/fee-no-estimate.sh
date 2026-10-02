@@ -3,10 +3,7 @@
 # claim, no payout. Once it has data again, the coin is paid at that rate.
 . "$(dirname "$0")/lib.sh"
 mkcfg
-W=$(wname a); newwallet "$W"
-round 60000 "$W"
-X=$(coins "$W"); read -r PK AMT <<< "$(coininfo "$W" "$X")"
-expire_and_sweep "$X" || finish
+expired_coin 60000
 # Empty blocks age the estimator's data out.
 for i in $(seq 40); do btc estimatesmartfee 6 | grep -q '"feerate"' || break; mine 25; done
 check "estimator empty" test -z "$(btc estimatesmartfee 6 | grep '"feerate"')"

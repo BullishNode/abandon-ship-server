@@ -6,11 +6,8 @@
 # refused.
 . "$(dirname "$0")/lib.sh"
 mkcfg
-W=$(wname a); newwallet "$W"
-round 70000 "$W"
-X=$(coins "$W"); read -r PK AMT <<< "$(coininfo "$W" "$X")"
+expired_coin 70000
 TRA=$(tr_address "$PK")
-expire_and_sweep "$X" || finish
 check "paid" pay_until "$X" 3
 confirm_payouts
 check "payout confirmed" eq "$(payout_state "$X")" confirmed
