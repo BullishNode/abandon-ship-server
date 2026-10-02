@@ -2,7 +2,7 @@
 name = "abandon-ship-server"
 version = "0.1.0"
 edition = "2021"
-description = "Sidecar for a Bull-run captaind: pays expired, unrefreshed Ark coins on-chain to the coin's own key"
+description = "Sidecar for captaind: pays expired, unrefreshed Ark coins on-chain to the coin's own key"
 license = "MIT"
 
 [dependencies]

@@ -7,9 +7,9 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
 | 1 | Delegated refresh stored before the ban; its round finalises after the claim | Exactly one wins; the loser fails cleanly | pass |
-| 2 | Interactive refresh mid-round (submit phase) when the claim runs | The ban + wait prevents a halted round; one winner | fixed: a claim in the submit window crashed captaind; banned coins cannot be submitted and the claim needs our ban intact (`h2-probe`) |
+| 2 | Interactive refresh mid-round (submit phase) when the claim runs | The ban + wait prevents a halted round; one winner | fixed: ban + wait; the claim needs our ban intact (`h2-probe`) |
 | 3 | Scheduled delegated refresh registered pre-expiry with a height past expiry | Server rejects it at submit; it does not block payout forever | pass |
-| 4 | Offboard session opened before the ban, finished after the claim | One winner | n/a: a ban blocks offboard start; open sessions end within `offboard_session_timeout` < wait |
+| 4 | Offboard session opened before the ban, finished after the claim | One winner | n/a: a ban blocks offboard start; sessions end within `offboard_session_timeout` < wait |
 | 5 | Lightning send phase 1 on an expired coin, concurrent with the claim | One winner | n/a: no LN channel on this stack; LN phase 1 commit is conditional (code) |
 | 6 | Two sidecar instances started together | Second exits on the leader lock | pass (`infra-postgres`) |
 | 7 | Crash after the claim commit, before building the tx | Restart pays once | pass (`crash-signed`) |
@@ -71,7 +71,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | 47 | The same user is paid in two batches to the same `tr(key)` | Address reuse: privacy note only | pass (privacy note) |
 | 48 | A payout lands on a key the user's wallet no longer scans (key index beyond its gap) | Documented recovery path | pass |
 | 49 | Sweep and payout confirm in the same block as a user exit attempt | The exit is invalid after the sweep | todo |
-| 50 | Bull disappears after payouts | Users can still spend `tr(coin key)` with the seed | pass (`unclaimed-delegated`) |
+| 50 | The operator disappears after payouts | Users can still spend `tr(coin key)` with the seed | pass (`unclaimed-delegated`) |
 
 ## Batch 6: "Races and timing" (requested follow-up)
 
@@ -126,18 +126,18 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | 89 | Sweep tx with zero non-anchor outputs (OP_RETURN only) | Not a sweep (`paid_any` false) | pass (unit test) |
 | 90 | Config values out of range (`max_fee_pct_per_payout` 0, `grace` 0, `ban_blocks` huge) | Rejected at load or bounded | pass |
 
-## Batch 10: "Make Bull lose money" (economic attacks, griefing)
+## Batch 10: "Make the operator lose money" (economic attacks, griefing)
 
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
 | 91 | Fee-poisoning: make bitcoind's estimator spike so payouts overpay fees | The per-coin fee rule defers | todo |
-| 92 | Many users go offline deliberately to force on-chain payouts (Bull pays nothing; users pay fees) | Fees come out of user outputs; no Bull loss | todo |
+| 92 | Many users go offline deliberately to force on-chain payouts (the operator pays nothing; users pay fees) | Fees come out of user outputs; no operator loss | todo |
 | 93 | User aims for the payout to drain the hot wallet faster than top-ups (cash-flow DoS) | Payouts wait for funds; no crash | todo |
 | 94 | User times exit plus payout around a reorg | 100-conf sweep requirement | todo |
 | 95 | User keeps coins just above `min_payout` with a high-fee batch so their output goes below dust | Bitcoind refuses → batch stuck → must not block others | fixed (as #34) |
 | 96 | Operator `max_fee_pct_per_payout` too low during congestion → payouts deferred indefinitely | Alert; operator raises the cap | todo |
 | 97 | Unrolled-round griefing: one exit quarantines a whole round's payouts | Accepted: manual review queue | todo |
-| 98 | User requests nothing; Bull still pays the batch fee share? | No: subtract-fee-from-outputs | todo |
+| 98 | User requests nothing; the operator still pays the batch fee share? | No: subtract-fee-from-outputs | todo |
 | 100 | Change output from the payout wallet reused across batches (wallet address reuse) | bitcoind generates fresh change | todo |
 
 ## Batch 11: "Humans and deployment" (misconfiguration, supply chain)
@@ -174,13 +174,13 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
 | X1 | Exit started before expiry; leaf confirms | Never paid (`confirmed_height`) | pass (`exit-full`) |
-| X2 | Exit started before expiry but only **partially progressed** (tree txs confirmed, leaf not) when expiry hits; watchman sweeps the rest | Never paid automatically; quarantine; user's exit fails: who holds the coin's value? | pass: quarantined for manual review (`exit-partial`) |
+| X2 | Exit started before expiry but only **partially progressed** (tree txs confirmed, leaf not) when expiry hits; watchman sweeps the rest | Never paid automatically; quarantine; user's exit fails: who holds the coin's value? | pass: quarantined (`exit-breaker`) |
 | X3 | Exit started **after expiry, before the sweep** (races the watchman) | Never paid while the race is open; the outcome decides | todo |
 | X4 | Exit started from a stale device **after the payout** | Exit txs invalid (funding already swept) | pass |
 | X5 | Exit of coin A, claim of coin B in the same round | B quarantined if A unrolled first; B paid only if the round was swept wholesale (then A cannot exit) | todo |
 | X6 | Leaf confirmed, user never claims the CSV output | Sidecar ignores it (`confirmed_height`) | pass (`exit-full`) |
-| X7 | Exit of an arkoor-received coin (deeper chain) before expiry | As X1 | pass (`exit-partial`) |
-| X8 | Exit **started then cancelled** before the final tx: part of the tree stays on-chain | Round partially unrolled: other coins quarantined although nobody exited fully | pass (`exit-partial`) |
+| X7 | Exit of an arkoor-received coin (deeper chain) before expiry | As X1 | pass (`exit-breaker`) |
+| X8 | Exit **started then cancelled** before the final tx: part of the tree stays on-chain | Round partially unrolled: other coins quarantined although nobody exited fully | pass (`exit-breaker`) |
 | X9 | Exit **blocked**: no on-chain funds for CPFP, nothing confirms; the coin expires and the round is swept wholesale | Sidecar pays it; the user's client is stuck in an "exiting" state (UX) | pass (`exit-blocked`) |
 | X10 | Two users of one round exit concurrently | Both exits complete; no payouts for the round | todo |
 | X11 | Watchman punishes an exit of an already-forfeited coin | Sidecar ignores server-policy outputs | n/a (`policy_type` filter) |
@@ -191,7 +191,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
-| J1 | User returns while the payout tx is still in the mempool; barkd uses bitcoind (`scantxoutset` sees only confirmed outputs) | Coin shows *Paying out* with its amount, nothing is lost from the total | gap: with a bitcoind chain source the amount enters the total at 1 conf (`web-journey`) |
+| J1 | User returns while the payout tx is still in the mempool; barkd uses bitcoind (`scantxoutset` sees only confirmed outputs) | Coin shows *Paying out* with its amount, nothing is lost from the total | gap: with bitcoind the amount enters the total at 1 conf (`web-journey`) |
 | J2 | Same as J1, but opened in a second browser on the same barkd (the *Paying out* list is in the first browser's local storage) | The second browser shows the same total | fixed (client: only on-chain payouts count) |
 | J3 | User clicks *Move to on-chain balance*; the sweep is in the mempool | The payout leaves *Paying out*; the total counts the money once; no second sweep offered | fixed (bark: mempool-spent payouts skipped; `web-journey`) |
 | J4 | User clicks *Move to on-chain balance* twice before the sweep confirms (or with a higher fee rate) | One sweep; one expiry-payout movement in history | fixed (as J3; `web-journey`) |
@@ -216,19 +216,19 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
-| 121 | Owner's small coin is claimed at a low fee rate; fees rise, it is no longer affordable and stays `claimed` | Other expired coins are still claimed and paid; the small one is paid when fees fall | fixed: a fee-stuck claimed coin blocked every new claim; now only payable claims count against `max_batch` (`fee-stuck-claim`) |
-| 122 | Owner arkoor-sends an expired, swept coin before the sidecar bans it | Refused (captaind refuses arkoor of expired coins unless `allow_expired_arkoor`); paid once; never more than the coin's amount for the coin and its children | pass: refused by the client and by captaind (`attack-ban-wait`) |
+| 121 | Owner's small coin is claimed at a low fee rate; fees rise, it is no longer affordable and stays `claimed` | Other expired coins are still claimed and paid; the small one is paid when fees fall | fixed: only payable claims count against `max_batch` (`fee-stuck-claim`) |
+| 122 | Owner arkoor-sends an expired, swept coin before the sidecar bans it | Refused (captaind refuses arkoor of expired coins unless `allow_expired_arkoor`); paid once; never more than the coin's amount for the coin and its children | pass (`attack-ban-wait`) |
 | 123 | Owner arkoor-sends the coin during the ban wait | Refused; paid once | pass (`attack-ban-wait`) |
 | 124 | Owner offboards the coin during the ban wait | Refused ("banned until block"); paid once | pass (`attack-ban-wait`) |
 | 125 | Owner offboards an expired, swept coin before the ban | The offboard wins; the coin is never paid (`offboarded_in`, not spendable) | todo |
-| 126 | One owner's partial exit unrolls a round in which many other coins were abandoned | Those coins are quarantined; payouts of other rounds go on | fixed: each quarantined coin counted against `max_quarantine_per_tick`, so one exit stopped all payouts; one unrolled round now counts once (`exit-breaker`) |
+| 126 | One owner's partial exit unrolls a round in which many other coins were abandoned | Those coins are quarantined; payouts of other rounds go on | fixed: one unrolled round counts as one quarantine (`exit-breaker`) |
 | 127 | Owner opens `max_batch` × 20 coins that wait forever at the front of the candidate window (unaffordable at today's fee) | Newer coins still progress | gap (as #62) |
-| 128 | Owner sends coins to a victim's Ark address (same key) | Victim's payout output carries the sum; nobody loses | pass: one output per address carrying the sum (`shared-address`) |
-| 129 | Owner splits value into coins each too small for the fee rule but affordable together on one key | Not claimed (the rule is per coin at claim time); they stay refreshable | pass: affordability is checked per coin before the ban (code) |
-| 130 | Owner refreshes one of two coins that share a key; the other is paid | Only the paid coin is listed with the payout; the sweep movement counts it once | gap: the bark fork lists the payout under every expired spent coin of the key, so the refreshed coin shows *Paid out* and the sweep movement subtracts its amount too; a spend recorded by adoption is not told apart from a refresh |
+| 128 | Owner sends coins to a victim's Ark address (same key) | Victim's payout output carries the sum; nobody loses | pass (`shared-address`) |
+| 129 | Owner splits value into coins each too small for the fee rule but affordable together on one key | Not claimed (the rule is per coin at claim time); they stay refreshable | pass (code) |
+| 130 | Owner refreshes one of two coins that share a key; the other is paid | Only the paid coin is listed with the payout; the sweep movement counts it once | gap: the bark fork lists the payout under every expired spent coin of the key; the sweep movement subtracts the refreshed coin too |
 | 131 | Client submits `refresh --all` with a banned coin and a fresh coin during the ban wait | Banned coin refused; the fresh coin can still be refreshed | todo |
 | 132 | Owner holds a delegated (`unclaimed`) output and claims it during the ban wait | The ban holds; the sidecar's claim or the owner's spend wins, never both | todo |
-| 133 | Client calls adopt-server-status on unexpired coins in a loop | Spent coins are marked spent; spendable ones unchanged; no payout effect | pass: adoption only copies the server's state (code) |
+| 133 | Client calls adopt-server-status on unexpired coins in a loop | Spent coins are marked spent; spendable ones unchanged; no payout effect | pass (code) |
 | 134 | Client calls sweep-expiry-payouts from two barkds on one seed at once | One sweep confirms; the other is rejected or replaced; one movement per barkd | todo |
-| 135 | Owner exits a coin after the sidecar banned it, before the claim | Exit txs spend an already-swept funding output: invalid; coin paid once | n/a: the claim needs a sweep `sweep_min_confs` deep, after which exit txs are invalid (as X13) |
+| 135 | Owner exits a coin after the sidecar banned it, before the claim | Exit txs spend an already-swept funding output: invalid; coin paid once | n/a (as X13) |
 | 136 | Owner with many claimed coins at a rising fee holds `max_batch` claimed rows | Unaffordable rows do not count against `max_batch` (as 121) | fixed (as 121) |

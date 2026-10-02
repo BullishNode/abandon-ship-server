@@ -55,10 +55,9 @@ finish() {
 
 # --- sidecar ------------------------------------------------------------------
 
-# mkcfg [key=value ...]: write $CFG from regtest/sidecar.toml, with the
-# node's RPC user and captaind's DB role, an absolute journal path, a short ban wait (scenarios
-# that race the round use ban_wait_secs=45, i.e. above round_interval 30s +
-# submit 5s + sign 5s), and any overrides.
+# mkcfg [key=value ...]: write $CFG from regtest/sidecar.toml with the test
+# credentials, an absolute journal path, ban_wait_secs=3 (scenarios that race a
+# round pass 45: above a 30 s round + 5 s submit + 5 s sign) and any overrides.
 CFG=$LOG/sidecar.toml
 mkcfg() {
 	sed -e 's/^user = .*/user = "second"/' -e 's/^pass = .*/pass = "ark"/' \

@@ -3,7 +3,6 @@
 # - A refreshes before the sidecar bans: refresh works, A's coin is never paid.
 # - B refreshes during the ban wait: refused, then paid on-chain.
 # - C submits a delegated refresh during the ban wait: refused, then paid.
-# ban_wait_secs=45: above a round (30 s interval + 5 s submit + 5 s sign).
 . "$(dirname "$0")/lib.sh"
 mkcfg ban_wait_secs=45
 A=$(wname a); B=$(wname b); C=$(wname c)
