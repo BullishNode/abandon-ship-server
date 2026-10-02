@@ -7,8 +7,12 @@ Run as the database owner. The sidecar gets read access to what it reads, column
 ```sql
 CREATE ROLE sidecar LOGIN PASSWORD '<secret>';
 
--- the sidecar's own schema, pre-created so the role needs no CREATE on the DB
-CREATE SCHEMA sidecar AUTHORIZATION sidecar;
+-- the sidecar's schema and tables are owned by the admin; the role gets
+-- SELECT/INSERT/UPDATE only (no DELETE/TRUNCATE on its own ledger)
+CREATE SCHEMA sidecar;
+\i migrations/0001_sidecar.sql
+GRANT USAGE ON SCHEMA sidecar TO sidecar;
+GRANT SELECT, INSERT, UPDATE ON sidecar.ban, sidecar.quarantine, sidecar.payout TO sidecar;
 
 GRANT SELECT ON vtxo, round_part_input, refinery_schema_history TO sidecar;
 -- column-level: participation state, plus the unlock preimage needed to
@@ -24,6 +28,8 @@ GRANT INSERT ON vtxo_history TO sidecar;
 To verify on regtest:
 - whether `vtxo_history` has its own sequence that also needs `USAGE`;
 - the refinery table name (`refinery_schema_history` assumed).
+
+The sidecar never creates tables. At startup it checks they exist, and refuses to run if they don't.
 
 Leader lock: the sidecar holds `pg_try_advisory_lock` for its session. A second instance exits at startup.
 
@@ -54,3 +60,20 @@ rpcwhitelist=sidecar:getwalletinfo,getblockcount,getrawtransaction,gettxout,geta
 3. restart the sidecar.
 
 The sidecar refuses to start on any other version.
+
+## Postgres connection
+
+The client connects without TLS. Run the sidecar on the Postgres host, or reach Postgres over a private network or tunnel. Do not expose Postgres to a public network for it.
+
+## Journal
+
+`journal_path` is the payout record that survives a DB restore. Back it up **separately** from captaind's database and never truncate it.
+
+## Runbook: restoring captaind's database
+
+1. Stop captaind **and** the sidecar.
+2. Restore the DB.
+3. Start the **sidecar first**, with its journal intact. On its first tick, it re-marks every journaled coin that is spendable again as spent, and quarantines it.
+4. Then start captaind.
+
+Starting captaind first leaves a window in which a user could refresh a coin that was already paid on-chain.

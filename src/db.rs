@@ -54,8 +54,13 @@ pub async fn captaind_schema_version(db: &Client) -> anyhow::Result<i32> {
 	Ok(db.query_one("SELECT MAX(version) AS v FROM refinery_schema_history", &[]).await?.try_get("v")?)
 }
 
-pub async fn migrate(db: &Client) -> anyhow::Result<()> {
-	db.batch_execute(include_str!("../migrations/0001_sidecar.sql")).await?;
+/// The sidecar does not create its tables: the DB admin runs
+/// `migrations/0001_sidecar.sql` and owns them (no DELETE for the role).
+pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
+	for t in ["sidecar.ban", "sidecar.quarantine", "sidecar.payout"] {
+		let ok: bool = db.query_one("SELECT to_regclass($1) IS NOT NULL AS ok", &[&t]).await?.try_get("ok")?;
+		anyhow::ensure!(ok, "table {t} missing: run migrations/0001_sidecar.sql as the DB admin");
+	}
 	Ok(())
 }
 

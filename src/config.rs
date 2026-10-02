@@ -5,6 +5,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
 	pub network: bitcoin::Network,
+	/// captaind's server pubkey (hex). Coins signed for any other server are refused.
+	pub server_pubkey: bitcoin::secp256k1::PublicKey,
 	/// Append-only payout journal on local disk (survives DB restores).
 	pub journal_path: std::path::PathBuf,
 	pub poll_interval_secs: u64,
@@ -39,6 +41,9 @@ pub struct Policy {
 	pub max_fee_pct_per_payout: u64,
 	/// Never pay a coin on-chain below this amount (it stays refreshable).
 	pub min_payout_sat: u64,
+	/// Stop the process if more coins than this are quarantined in one tick
+	/// (likely an encoding or schema change, not bad coins).
+	pub max_quarantine_per_tick: u64,
 }
 
 impl Config {

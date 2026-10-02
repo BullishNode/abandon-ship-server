@@ -70,6 +70,13 @@ async fn load_validated(
 	}
 }
 
+/// A validated coin must be a plain key coin of *our* server (B3).
+fn foreign(vtxo: &Vtxo, cfg: &Config) -> Option<&'static str> {
+	if vtxo.server_pubkey() != cfg.server_pubkey { return Some("coin of another server") }
+	if !matches!(vtxo.policy(), ark::VtxoPolicy::Pubkey(_)) { return Some("not a plain pubkey coin") }
+	None
+}
+
 /// See `load_validated`: the one accepted partial-validation case.
 fn unclaimed_ok(
 	vtxo: &Vtxo, anchor_tx: &bitcoin::Transaction, err: &ark::vtxo::VtxoValidationError,
@@ -136,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
 	let ver = db::captaind_schema_version(&db).await?;
 	anyhow::ensure!(cfg.postgres.allowed_schema_versions.contains(&ver),
 		"captaind schema version {ver} not in allowed_schema_versions; run the upgrade gate first");
-	db::migrate(&db).await?;
+	db::check_tables(&db).await?;
 	let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
 	let mut journal = journal::Journal::open(&cfg.journal_path)?;
 
@@ -159,6 +166,11 @@ async fn tick(
 	cfg: &Config, sweep_spks: &[ScriptBuf], db: &mut tokio_postgres::Client, chain: &chain::Chain,
 	journal: &mut journal::Journal,
 ) -> anyhow::Result<()> {
+	// T10 every tick, not just at startup: captaind may be upgraded under us.
+	let ver = db::captaind_schema_version(db).await?;
+	if !cfg.postgres.allowed_schema_versions.contains(&ver) {
+		return Err(InvariantViolation(format!("captaind schema version changed to {ver}")).into());
+	}
 	chain.check_wallet().await?;
 	let tip = chain.tip().await?;
 
@@ -198,11 +210,19 @@ async fn tick(
 		return pay_claimed(cfg, db, chain, journal, fee_rate).await;
 	}
 	let mut claims_left = p.max_batch;
+	let mut quarantined: u64 = 0;
 	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch).await? {
 		if claims_left == 0 { break }
 		if journal.contains(&c.vtxo_id) { continue } // handled above
 		match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
 			Outcome::Quarantine(reason) => {
+				quarantined += 1;
+				if quarantined > p.max_quarantine_per_tick {
+					// Many failures at once smell like an encoding/schema change,
+					// not bad coins: stop instead of quarantining everything.
+					return Err(InvariantViolation(format!(
+						"more than {} quarantines in one tick (last: {reason})", p.max_quarantine_per_tick)).into());
+				}
 				warn!(vtxo = %c.vtxo_id, %reason, "quarantined");
 				db::quarantine(db, &c.vtxo_id, &reason).await?;
 			},
@@ -241,6 +261,9 @@ async fn process_coin(
 	};
 	if vtxo.id().to_string() != c.vtxo_id {
 		return Ok(Outcome::Quarantine("vtxo blob id != row id".into()));
+	}
+	if let Some(why) = foreign(&vtxo, cfg) {
+		return Ok(Outcome::Quarantine(why.into()));
 	}
 	let anchor = vtxo.chain_anchor();
 	if vtxo.expiry_height().to_u32().saturating_add(p.grace_blocks) > tip {
@@ -332,6 +355,9 @@ async fn pay_claimed(
 			.ok_or_else(|| anyhow::anyhow!("claimed coin {} has no vtxo row", p.vtxo_id))?;
 		let (vtxo, _) = load_validated(db, chain, &blob).await?
 			.map_err(|r| InvariantViolation(format!("claimed coin {}: {r}", p.vtxo_id)))?;
+		if let Some(why) = foreign(&vtxo, cfg) {
+			return Err(InvariantViolation(format!("claimed coin {}: {why}", p.vtxo_id)).into());
+		}
 		let addr = payout::address_for_pubkey(&vtxo.user_pubkey(), cfg.network).to_string();
 		if vtxo.id().to_string() != p.vtxo_id || vtxo.amount().to_sat() != p.amount_sat || addr != p.address {
 			return Err(InvariantViolation(format!("payout row {} differs from its validated VTXO", p.vtxo_id)).into());

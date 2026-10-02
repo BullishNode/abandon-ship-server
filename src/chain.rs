@@ -1,12 +1,10 @@
 //! bitcoind RPC (blocking client, called from spawn_blocking). The chain is
 //! the source of truth; captaind's DB only supplies hints.
 
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use bitcoin::{Address, Amount, OutPoint, Transaction, Txid};
-use bitcoincore_rpc::json::WalletCreateFundedPsbtOptions;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 
 #[derive(Clone)]
@@ -50,7 +48,7 @@ impl Chain {
 	}
 
 	pub async fn tip(&self) -> anyhow::Result<u32> {
-		self.run(|c| Ok(c.get_block_count()? as u32)).await
+		self.run(|c| { let h: u64 = c.call("getblockcount", &[])?; Ok(h as u32) }).await
 	}
 
 	/// A transaction and its confirmations (0 = mempool). Requires txindex.
@@ -89,30 +87,36 @@ impl Chain {
 	/// equally from all outputs. Does not broadcast.
 	pub async fn build_payout(&self, outputs: Vec<(String, u64)>, fee_rate_sat_vb: f64) -> anyhow::Result<BuiltPayout> {
 		self.run(move |c| {
-			let n = outputs.len() as u16;
-			let outs: HashMap<String, Amount> = outputs.into_iter()
-				.map(|(a, s)| (a, Amount::from_sat(s))).collect();
-			let opts = WalletCreateFundedPsbtOptions {
-				subtract_fee_from_outputs: (0..n).collect(),
-				replaceable: Some(true),
-				// The rate we already checked against the caps; never let the
+			// Untyped calls only: typed decoding broke on Core 31 (O10).
+			let n = outputs.len();
+			let outs: serde_json::Map<String, serde_json::Value> = outputs.into_iter()
+				.map(|(a, s)| (a, serde_json::Value::from(Amount::from_sat(s).to_btc()))).collect();
+			let opts = serde_json::json!({
+				"subtractFeeFromOutputs": (0..n).collect::<Vec<_>>(),
+				"replaceable": true,
+				// The rate already checked by the fee gate; never let the
 				// wallet pick its own (or fall back) behind our back.
-				fee_rate: Some(Amount::from_sat((fee_rate_sat_vb * 1000.0).ceil() as u64)),
-				..Default::default()
-			};
-			let funded = c.wallet_create_funded_psbt(&[], &outs, None, Some(opts), None)?;
-			let signed = c.wallet_process_psbt(&funded.psbt, Some(true), None, None)?;
-			let fin = c.finalize_psbt(&signed.psbt, Some(true))?;
-			anyhow::ensure!(fin.complete, "payout psbt not complete");
-			let raw = fin.hex.ok_or_else(|| anyhow::anyhow!("no tx hex"))?;
-			let tx: Transaction = bitcoin::consensus::deserialize(&raw)?;
-			Ok(BuiltPayout { tx, raw, fee_sat: funded.fee.to_sat() })
+				"fee_rate": fee_rate_sat_vb,
+			});
+			let funded: serde_json::Value = c.call("walletcreatefundedpsbt",
+				&[serde_json::json!([]), serde_json::Value::Object(outs), 0.into(), opts])?;
+			let psbt = funded["psbt"].as_str().ok_or_else(|| anyhow::anyhow!("no psbt"))?;
+			let fee_btc = funded["fee"].as_f64().ok_or_else(|| anyhow::anyhow!("no fee"))?;
+			let signed: serde_json::Value = c.call("walletprocesspsbt", &[psbt.into(), true.into()])?;
+			let spsbt = signed["psbt"].as_str().ok_or_else(|| anyhow::anyhow!("no signed psbt"))?;
+			let fin: serde_json::Value = c.call("finalizepsbt", &[spsbt.into(), true.into()])?;
+			anyhow::ensure!(fin["complete"].as_bool() == Some(true), "payout psbt not complete");
+			let hex = fin["hex"].as_str().ok_or_else(|| anyhow::anyhow!("no tx hex"))?;
+			let tx: Transaction = bitcoin::consensus::encode::deserialize_hex(hex)?;
+			let raw = bitcoin::consensus::serialize(&tx);
+			Ok(BuiltPayout { tx, raw, fee_sat: Amount::from_btc(fee_btc)?.to_sat() })
 		}).await
 	}
 
 	/// Broadcast; "already in mempool / known" counts as success.
 	pub async fn broadcast(&self, raw: Vec<u8>) -> anyhow::Result<()> {
-		self.run(move |c| match c.send_raw_transaction(raw.as_slice()) {
+		let hex = bitcoin::hex::DisplayHex::to_lower_hex_string(&raw[..]);
+		self.run(move |c| match c.call::<serde_json::Value>("sendrawtransaction", &[hex.into()]) {
 			Ok(_) => Ok(()),
 			Err(e) if e.to_string().contains("already") => Ok(()),
 			Err(e) => Err(e.into()),

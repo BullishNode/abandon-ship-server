@@ -27,7 +27,7 @@ Sidecar process for [captaind](https://gitlab.com/ark-bitcoin/bark) (bark master
 
 Any per-coin problem quarantines that coin; the loop carries on (T3). The invariant check (I2) runs after every tick, and a violation stops the process.
 
-Startup refuses to run if another instance holds the leader lock (T9), or if captaind's schema version is not allowlisted (T10).
+Startup refuses to run if another instance holds the leader lock (T9), if the `sidecar` tables are missing (the DB admin creates them), or if captaind's schema version is not allowlisted. The version is re-checked every tick (T10). More than `max_quarantine_per_tick` quarantines in one tick stop the process. Coins must be plain pubkey coins signed for `server_pubkey`. All bitcoind calls are untyped JSON-RPC.
 
 ## Additional guards (from testing; see `docs/observations.md`)
 
