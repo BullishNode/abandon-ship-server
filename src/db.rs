@@ -230,10 +230,10 @@ pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, Vec<u8
 
 /// Journaled coins that are spendable/unclaimed again in captaind (DB restore).
 pub async fn resurrected(db: &Client, ids: &[String]) -> anyhow::Result<Vec<String>> {
-	Ok(db.query(
+	db.query(
 		"SELECT vtxo_id FROM vtxo WHERE vtxo_id = ANY($1) AND spend_state IN ('spendable','unclaimed')",
 		&[&ids],
-	).await?.into_iter().map(|r| Ok(r.try_get("vtxo_id")?)).collect::<anyhow::Result<_>>()?)
+	).await?.into_iter().map(|r| Ok(r.try_get("vtxo_id")?)).collect()
 }
 
 pub async fn payouts_in_state(db: &Client, state: &str) -> anyhow::Result<Vec<Payout>> {

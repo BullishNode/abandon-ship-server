@@ -49,6 +49,7 @@ pub fn is_sweep(spender: &Transaction, sweep_spks: &[ScriptBuf]) -> bool {
 ///   amount and at least expected minus the whole fee;
 /// - every output's fee share is within `max_fee_pct` and leaves dust;
 /// - at most one other output (change), which the caller checks is ours.
+///
 /// Returns the change output's script, if any.
 pub fn verify_payout(
 	tx: &Transaction,
@@ -113,8 +114,8 @@ mod tests {
 	fn sweep_only_to_sweep_scripts() {
 		let sweep = spk(1);
 		let p2a = ScriptBuf::from_bytes(vec![0x51, 0x02, 0x4e, 0x73]);
-		assert!(is_sweep(&tx(vec![(sweep.clone(), 1000), (p2a.clone(), 0)]), &[sweep.clone()]));
-		assert!(!is_sweep(&tx(vec![(sweep.clone(), 1000), (spk(2), 500)]), &[sweep.clone()]));
+		assert!(is_sweep(&tx(vec![(sweep.clone(), 1000), (p2a.clone(), 0)]), std::slice::from_ref(&sweep)));
+		assert!(!is_sweep(&tx(vec![(sweep.clone(), 1000), (spk(2), 500)]), std::slice::from_ref(&sweep)));
 		assert!(!is_sweep(&tx(vec![(p2a, 0)]), &[sweep]));
 	}
 
