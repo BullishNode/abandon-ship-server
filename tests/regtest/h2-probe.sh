@@ -1,9 +1,9 @@
 #!/bin/bash
-# H2/O20 with the sidecar's real flow: the owner's interactive refresh is
+# The owner's interactive refresh is
 # waiting for a round; the sidecar's ban lands before the round starts, or
-# 0.5 s / 2 s / 4.5 s after "Round started" (inside the submit window). With ban_wait_secs=45 the claim
-# comes after the round is persisted, so captaind must not crash, and exactly
-# one side wins each coin.
+# 0.5 s / 2 s / 4.5 s after "Round started" (inside the submit window). With
+# ban_wait_secs=45 the claim comes after the round is persisted, so captaind
+# must not crash, and exactly one side wins each coin.
 . "$(dirname "$0")/lib.sh"
 mkcfg ban_wait_secs=45
 cd "$R"
@@ -29,13 +29,13 @@ for i in 0 1 2 3; do
 	fi
 	tick
 	check "probe $O: banned, or refreshed before the tick" test -n \
-		"$(q "SELECT 1 FROM sidecar.ban WHERE vtxo_id='$X'")$(q "SELECT 1 FROM vtxo WHERE vtxo_id='$X' AND spent_in_round IS NOT NULL")"
+		"$(q "SELECT 1 FROM sidecar.ban WHERE vtxo_id='$X'")$(refreshed "$X")"
 	wait $P
 	for t in 1 2 3; do
-		[ -n "$(payout_state "$X")$(q "SELECT spent_in_round FROM vtxo WHERE vtxo_id='$X' AND spent_in_round IS NOT NULL")" ] && break
+		[ -n "$(payout_state "$X")$(refreshed "$X")" ] && break
 		sleep $(( $(ban_wait) + 1 )); tick
 	done
-	REFRESHED=$(q "SELECT 1 FROM vtxo WHERE vtxo_id='$X' AND spent_in_round IS NOT NULL")
+	REFRESHED=$(refreshed "$X")
 	PAID=$(payout_state "$X")
 	say "probe $O: refreshed='${REFRESHED}' payout='${PAID}'"
 	check "probe $O: exactly one winner" test -n "$REFRESHED$PAID" -a -z "$( [ -n "$REFRESHED" ] && [ -n "$PAID" ] && echo both)"

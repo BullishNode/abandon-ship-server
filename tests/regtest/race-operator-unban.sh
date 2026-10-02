@@ -1,5 +1,5 @@
 #!/bin/bash
-# #57/A4/A6/B2: the claim needs the sidecar's own ban, still in place.
+# The claim needs the sidecar's own ban, still in place.
 # - operator unbans during the wait: the wait restarts, no claim;
 # - operator re-bans with another (longer) height: no claim while it holds;
 # - our ban lapses (blocks mined past it): the wait restarts, no claim;

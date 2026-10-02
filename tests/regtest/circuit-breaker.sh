@@ -1,5 +1,5 @@
 #!/bin/bash
-# A5: many quarantines in one tick smell like an encoding/schema change. With
+# Many quarantines in one tick smell like an encoding/schema change. With
 # max_quarantine_per_tick=1 and three undecodable coins the sidecar stops
 # after the first quarantine instead of quarantining everything.
 . "$(dirname "$0")/lib.sh"

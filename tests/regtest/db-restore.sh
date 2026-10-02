@@ -1,5 +1,5 @@
 #!/bin/bash
-# #109/C11: captaind's DB is restored from a backup taken before the
+# captaind's DB is restored from a backup taken before the
 # claim: the paid coin is spendable again, unbanned, with no ledger row.
 # Runbook order (sidecar first): the first tick re-marks it spent from the
 # journal and quarantines it; nothing is paid twice; the owner's refresh is

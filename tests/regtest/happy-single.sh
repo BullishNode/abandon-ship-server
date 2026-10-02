@@ -1,5 +1,5 @@
 #!/bin/bash
-# S1/S4: one expired round coin, owner offline: paid once to tr(coin key);
+# One expired round coin, owner offline: paid once to tr(coin key);
 # the owner's later refresh is refused. Also checks the payout feerate equals
 # bitcoind's estimate (untyped walletcreatefundedpsbt/finalizepsbt path).
 . "$(dirname "$0")/lib.sh"
@@ -24,5 +24,5 @@ check "payout confirmed" eq "$(payout_state "$ID")" confirmed
 "$R/bark" "$W" refresh --vtxo "$ID" > "$LOG/refresh-after.log" 2>&1
 check "owner's refresh of the paid coin refused" grep -qiE 'error|unusable|not spendable' "$LOG/refresh-after.log"
 check "coin still spent" eq "$(spend_state "$ID")" spent
-check "no second payout row/tx" eq "$(txs_paying "$(tr_address "$PK")")" 1
+check "one payout tx ever sent to tr(key)" eq "$(wallet_sends_to "$(tr_address "$PK")")" 1
 finish

@@ -1,5 +1,5 @@
 #!/bin/bash
-# #52/A11: captaind's spend of a coin is open (row lock held) when the claim
+# captaind's spend of a coin is open (row lock held) when the claim
 # runs. The claim waits for the lock: if the spend commits, the claim loses
 # (no payout); if it rolls back, the claim wins (paid).
 . "$(dirname "$0")/lib.sh"

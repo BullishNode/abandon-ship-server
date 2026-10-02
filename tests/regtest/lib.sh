@@ -37,13 +37,13 @@ check() { # check <description> <command...>
 }
 eq() { [ "$1" = "$2" ] || { say "  got '$1', want '$2'"; return 1; }; }
 
-# Ledger invariants (I2, journal) over the whole DB, then PASS/FAIL.
+# Ledger invariants (paid coins spent, journal) over the whole DB, then PASS/FAIL.
 finish() {
 	local bad
 	bad=$(q "SELECT count(*) FROM sidecar.payout p LEFT JOIN vtxo v ON v.vtxo_id = p.vtxo_id
 		WHERE v.vtxo_id IS NULL OR v.spend_state <> 'spent' OR v.spent_in_round IS NOT NULL
 		   OR v.oor_spent_txid IS NOT NULL OR v.offboarded_in IS NOT NULL")
-	check "I2: every paid coin is spent and nothing else spent it" eq "$bad" 0
+	check "every paid coin is spent and nothing else spent it" eq "$bad" 0
 	local unjournaled=0 id
 	for id in $(q "SELECT vtxo_id FROM sidecar.payout WHERE txid IS NOT NULL"); do
 		grep -q "^$id " "$JOURNAL" || unjournaled=$((unjournaled + 1))
@@ -99,7 +99,10 @@ pay_until() { # pay_until "<ids>" [max_ticks] [states]
 	return 1
 }
 
-# Mine and tick until the payout txs confirm (6 confs for the 'confirmed' state).
+# Tick <n> times, sleeping the ban wait after each.
+ticks() { local i; for i in $(seq "$1"); do tick; sleep $(( $(ban_wait) + 1 )); done; }
+
+# Mine 6 blocks and tick, so payouts reach the 'confirmed' state.
 confirm_payouts() {
 	mine 6
 	tick || true
@@ -120,12 +123,20 @@ newwallet() {
 }
 wname() { echo "t-$NAME-$RUN-$1"; }
 
+# After many blocks captaind's chain view lags bitcoind's, and it refuses
+# boards ("requested VTXO lifetime ... is too high"): wait (max 3 min) until it
+# has processed the tip.
+captaind_synced() {
+	local i; for i in $(seq 90); do [ "$(q "SELECT max(height) FROM captaind_block")" -ge "$(tip)" ] && return 0; sleep 2; done
+	say "captaind still behind the tip"; return 1
+}
+
 # round <sat> <wallet>...: board <sat> per wallet, then refresh all of them
 # into one round. Afterwards each wallet holds one round coin.
 round() {
 	local amt=$1; shift
 	local w pids=()
-	mine 1
+	mine 1; captaind_synced
 	for w in "$@"; do bark "$w" board "$amt sat" > "$LOG/board-$w.log" || say "board failed: $w"; done
 	mine 4
 	for w in "$@"; do bark "$w" balance > /dev/null; done
@@ -140,10 +151,6 @@ coins() { # coins <wallet> [state]
 	bark "$1" vtxos | python3 -c "import json,sys
 for v in json.load(sys.stdin):
     if v['state']['type'] == '${2:-spendable}': print(v['id'])"
-}
-vtxo_field() { # vtxo_field <wallet> <id> <field>
-	bark "$1" vtxos | python3 -c "import json,sys
-print([v for v in json.load(sys.stdin) if v['id'] == '$2'][0]['$3'])"
 }
 
 # Ark address of a wallet.
@@ -161,7 +168,7 @@ expire_and_sweep() { # expire_and_sweep <ids>
 	for i in $(seq 60); do
 		spent=1
 		for a in $anchors; do
-			[ -n "$(q "SELECT onchain_spent_txid FROM vtxo WHERE vtxo_id='$a' AND onchain_spent_txid IS NOT NULL")" ] || spent=0
+			[ -n "$(anchor_spender "$a")" ] || spent=0
 		done
 		[ $spent = 1 ] && break
 		mine 1; sleep 3
@@ -182,9 +189,16 @@ ensure_fees() {
 
 payout_state() { q "SELECT state FROM sidecar.payout WHERE vtxo_id='$1'"; }
 payout_txid() { q "SELECT txid FROM sidecar.payout WHERE vtxo_id='$1'"; }
+payout_address() { q "SELECT address FROM sidecar.payout WHERE vtxo_id='$1'"; }
 spend_state() { q "SELECT spend_state FROM vtxo WHERE vtxo_id='$1'"; }
 quarantine_reason() { q "SELECT reason FROM sidecar.quarantine WHERE vtxo_id='$1'"; }
+bans() { q "SELECT count(*) FROM sidecar.ban WHERE vtxo_id='$1'"; }
 journaled() { grep -c "^$1 " "$JOURNAL"; }
+# Non-empty only when set.
+anchor_of() { q "SELECT anchor_point FROM vtxo WHERE vtxo_id='$1'"; }
+anchor_spender() { q "SELECT onchain_spent_txid FROM vtxo WHERE vtxo_id='$1' AND onchain_spent_txid IS NOT NULL"; }
+leaf_confirmed() { q "SELECT confirmed_height FROM vtxo WHERE vtxo_id='$1' AND confirmed_height IS NOT NULL"; }
+refreshed() { q "SELECT spent_in_round FROM vtxo WHERE vtxo_id='$1' AND spent_in_round IS NOT NULL"; }
 
 # BIP86 tr(key) address derived by bitcoind from a compressed pubkey.
 tr_address() {
@@ -196,12 +210,6 @@ tr_address() {
 paid_to() {
 	btc getrawtransaction "$1" 1 | python3 -c "import json,sys
 t=json.load(sys.stdin); print(sum(round(o['value']*1e8) for o in t['vout'] if o['scriptPubKey'].get('address')=='$2'))"
-}
-
-# How many confirmed or mempool txs ever paid <address> (scantxoutset only sees
-# unspent outputs, so use the payout wallet's view plus the tx index).
-txs_paying() {
-	q "SELECT DISTINCT txid FROM sidecar.payout WHERE address='$1' AND txid IS NOT NULL" | grep -c .
 }
 
 # coininfo <wallet> <id>: "<user_pubkey> <amount_sat>" from the wallet's view.
@@ -219,7 +227,7 @@ assert_paid() { # assert_paid <id> <user_pubkey> <amount_sat> [max_fee_pct]
 	check "${id:0:8} has a payout tx" test -n "$txid"
 	[ -n "$txid" ] || return 0
 	addr=$(tr_address "$pk")
-	check "${id:0:8} payout address = tr(user key)" eq "$(q "SELECT address FROM sidecar.payout WHERE vtxo_id='$id'")" "$addr"
+	check "${id:0:8} payout address = tr(user key)" eq "$(payout_address "$id")" "$addr"
 	got=$(paid_to "$txid" "$addr")
 	check "${id:0:8} output within fee share of $amt (got $got)" test "$got" -le "$amt" -a "$got" -ge $((amt * (100 - pct) / 100))
 	check "${id:0:8} spent in captaind" eq "$(spend_state "$id")" spent

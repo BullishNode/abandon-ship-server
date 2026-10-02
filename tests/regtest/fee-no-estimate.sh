@@ -1,5 +1,5 @@
 #!/bin/bash
-# O23: bitcoind's estimator has no answer (no -fallbackfee): no ban, no
+# bitcoind's estimator has no answer (no -fallbackfee): no ban, no
 # claim, no payout. Once it has data again, the coin is paid at that rate.
 . "$(dirname "$0")/lib.sh"
 mkcfg
@@ -10,9 +10,9 @@ expire_and_sweep "$X" || finish
 # Empty blocks age the estimator's data out.
 for i in $(seq 40); do btc estimatesmartfee 6 | grep -q '"feerate"' || break; mine 25; done
 check "estimator empty" test -z "$(btc estimatesmartfee 6 | grep '"feerate"')"
-for i in 1 2; do tick; sleep $(( $(ban_wait) + 1 )); done
+ticks 2
 check "logged 'no fee estimate'" grep -q "no fee estimate: not claiming or paying" "$LOG/tick.log"
-check "no ban" eq "$(q "SELECT count(*) FROM sidecar.ban WHERE vtxo_id='$X'")" 0
+check "no ban" eq "$(bans "$X")" 0
 check "no claim" eq "$(payout_state "$X")" ""
 check "still spendable" eq "$(spend_state "$X")" spendable
 ensure_fees

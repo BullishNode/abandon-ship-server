@@ -1,5 +1,5 @@
 #!/bin/bash
-# #6/#21/#54/#76/O18: one leader only; on Postgres connection loss the
+# One leader only; on Postgres connection loss the
 # sidecar exits (it must not run on without its advisory lock). After the
 # restart a fresh process pays normally.
 . "$(dirname "$0")/lib.sh"

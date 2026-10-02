@@ -1,5 +1,5 @@
 #!/bin/bash
-# S2: coins of three offline owners in one round are paid in one batched tx,
+# Coins of three offline owners in one round are paid in one batched tx,
 # one output each.
 . "$(dirname "$0")/lib.sh"
 mkcfg

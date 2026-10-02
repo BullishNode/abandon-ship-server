@@ -1,5 +1,5 @@
 #!/bin/bash
-# #22/#77/O17: bitcoind down -> tick fails, nothing claimed; payout wallet
+# bitcoind down -> tick fails, nothing claimed; payout wallet
 # unloaded -> tick fails loudly, nothing claimed; bitcoind restarted -> the
 # wallet comes back (load_on_startup) and the coin is paid.
 . "$(dirname "$0")/lib.sh"
@@ -9,7 +9,7 @@ round 60000 "$W"
 X=$(coins "$W"); read -r PK AMT <<< "$(coininfo "$W" "$X")"
 expire_and_sweep "$X" || finish
 nothing() {
-	check "$1: no ban" eq "$(q "SELECT count(*) FROM sidecar.ban WHERE vtxo_id='$X'")" 0
+	check "$1: no ban" eq "$(bans "$X")" 0
 	check "$1: no claim" eq "$(payout_state "$X")" ""
 }
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# C8/C10: the sidecar's ledger loses a payout (bug or partial restore):
+# The sidecar's ledger loses a payout (bug or partial restore):
 # - a paid row reset to 'claimed' -> journal: the sidecar stops;
 # - a paid row deleted            -> the coin is spent: no repay.
 . "$(dirname "$0")/lib.sh"

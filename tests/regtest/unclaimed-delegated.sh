@@ -1,5 +1,5 @@
 #!/bin/bash
-# A1/O27: a delegated refresh whose owner never returns leaves an 'unclaimed'
+# A delegated refresh whose owner never returns leaves an 'unclaimed'
 # hArk output. It is paid, and the payout is spendable with the owner's seed
 # (examples/coin_key_descriptor.rs).
 . "$(dirname "$0")/lib.sh"
@@ -12,7 +12,7 @@ B=$(coins "$D")
 say "board coin $B; delegated refresh, then the owner goes away"
 bark "$D" refresh --delegated --all > "$LOG/delegated.log" 2>&1 || say "delegated refresh failed"
 for i in $(seq 40); do
-	RID=$(q "SELECT spent_in_round FROM vtxo WHERE vtxo_id='$B' AND spent_in_round IS NOT NULL")
+	RID=$(refreshed "$B")
 	[ -n "$RID" ] && break; sleep 3
 done
 check "delegated refresh ran in a round" test -n "$RID"
@@ -27,7 +27,7 @@ expire_and_sweep "$ID" || finish
 
 check "paid within 3 ticks" pay_until "$ID" 3
 check "not quarantined" eq "$(quarantine_reason "$ID")" ""
-TXID=$(payout_txid "$ID"); ADDR=$(q "SELECT address FROM sidecar.payout WHERE vtxo_id='$ID'")
+TXID=$(payout_txid "$ID"); ADDR=$(payout_address "$ID")
 GOT=$(paid_to "$TXID" "$ADDR")
 check "output within fee share of $AMT (got $GOT)" test "$GOT" -le "$AMT" -a "$GOT" -ge $((AMT * 80 / 100))
 confirm_payouts

@@ -1,5 +1,5 @@
 #!/bin/bash
-# J1-J7: the user journey of bark-web on the variant-b barkd (image
+# The user journey of bark-web on the variant-b barkd (image
 # abandon-ship/bark:variant-b, as the compose service `barkd`): receive, go
 # offline, expire, get paid, come back, adopt the spent state, find the payout,
 # restore the seed on a second barkd, sweep, and check that the money shows once.
@@ -30,7 +30,7 @@ A=$(api POST $B /api/v1/onchain/addresses/next | python3 -c "import json,sys;pri
 btc -rpcwallet=faucet -named sendtoaddress address="$A" amount=0.01 fee_rate=5 > /dev/null; mine 1; api POST $B /api/v1/onchain/sync > /dev/null
 
 # Receive: board, then refresh into a round.
-api POST $B /api/v1/boards/board-amount '{"amount_sat":100000}' > "$LOG/board.json"; mine 4; sleep 3
+captaind_synced; api POST $B /api/v1/boards/board-amount '{"amount_sat":100000}' > "$LOG/board.json"; mine 4; sleep 3
 api POST $B /api/v1/wallet/sync > /dev/null
 api POST $B /api/v1/wallet/refresh/all > "$LOG/refresh.json"
 for i in $(seq 40); do api GET $B /api/v1/wallet/rounds | grep -q '"funding_txid":"' && break; sleep 3; done

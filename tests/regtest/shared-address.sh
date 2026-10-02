@@ -1,5 +1,5 @@
 #!/bin/bash
-# #36/O7: two arkoor payments to the same Ark address give two coins with one
+# Two arkoor payments to the same Ark address give two coins with one
 # key. The payout has one output to tr(key) carrying the sum.
 . "$(dirname "$0")/lib.sh"
 mkcfg

@@ -1,6 +1,6 @@
 #!/bin/bash
-# #7/C1: claim committed, payout not built (funding fails): the next run pays
-# once. #8/#73/A3: tx stored ('signed') but the process dies before the
+# Claim committed, payout not built (funding fails): the next run pays
+# once. Tx stored ('signed') but the process dies before the
 # journal write and the broadcast (journal unwritable): the next run journals
 # it and broadcasts the same stored tx; nothing else is built.
 . "$(dirname "$0")/lib.sh"
