@@ -22,6 +22,11 @@ pub fn affordable(value: u64, share: u64, pct: u64) -> bool {
 	100 * share <= pct * value && value >= share + P2TR_DUST_SAT
 }
 
+/// The smallest value `affordable` accepts.
+pub fn min_affordable(share: u64, pct: u64) -> u64 {
+	(100 * share).div_ceil(pct).max(share + P2TR_DUST_SAT)
+}
+
 /// P2A fee-anchor script (OP_1 <0x4e73>), as used by captaind's claim txs.
 fn is_p2a(spk: &ScriptBuf) -> bool {
 	spk.as_bytes() == [0x51, 0x02, 0x4e, 0x73]
@@ -108,6 +113,10 @@ mod tests {
 		assert!(affordable(340, 10, 20));
 		assert!(!affordable(339, 10, 20));
 		assert_eq!(fee_share_bound(1.0), 230);
+		for (share, pct) in [(100, 20), (10, 20), (690, 20), (690, 1), (7, 99)] {
+			let m = min_affordable(share, pct);
+			assert!(affordable(m, share, pct) && !affordable(m - 1, share, pct));
+		}
 	}
 
 	#[test]

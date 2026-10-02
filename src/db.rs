@@ -49,8 +49,8 @@ pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
 }
 
 /// Expired, unpaid, unquarantined, spendable user coins past the grace period,
-/// of at least `min_amount` (filtered before the limit, so small coins never
-/// fill the window).
+/// of at least `min_amount` (filtered before the limit, so coins too small to
+/// pay never fill the window).
 pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64) -> anyhow::Result<Vec<Candidate>> {
 	let rows = db.query("
 		SELECT v.vtxo_id, v.vtxo

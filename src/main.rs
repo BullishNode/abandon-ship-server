@@ -130,7 +130,10 @@ async fn tick(
 	let mut claims_left = p.max_batch - payable;
 	let mut quarantined: u64 = 0;
 	let mut unrolled = std::collections::HashSet::new();
-	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, p.min_payout_sat).await? {
+	// Coins unaffordable at this rate are left out before the candidate
+	// limit: waiting for fees to fall, they must not crowd out payable coins.
+	let min_amount = p.min_payout_sat.max(checks::min_affordable(share, p.max_fee_pct_per_payout));
+	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, min_amount).await? {
 		if claims_left <= 0 { break }
 		if journal.contains(&c.vtxo_id) { continue } // handled above
 		let (reason, fault) = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
