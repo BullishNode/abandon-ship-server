@@ -177,10 +177,15 @@ pub async fn claim(
 	Ok(true)
 }
 
-/// Every coin id in the ledger with a txid (for journal reconciliation).
-pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, Vec<u8>)>> {
-	db.query("SELECT vtxo_id, txid, raw_tx FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
-		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?, r.try_get("raw_tx")?))).collect()
+/// Every coin id in the ledger with its txid (for journal reconciliation).
+/// Without the raw tx: every row of a batch stores the whole batch tx.
+pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String)>> {
+	db.query("SELECT vtxo_id, txid FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
+		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?))).collect()
+}
+
+pub async fn raw_tx(db: &Client, txid: &str) -> anyhow::Result<Vec<u8>> {
+	Ok(db.query_one("SELECT raw_tx FROM sidecar.payout WHERE txid = $1 LIMIT 1", &[&txid]).await?.try_get("raw_tx")?)
 }
 
 /// Journaled coins that are spendable/unclaimed again in captaind (DB restore).

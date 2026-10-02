@@ -4,9 +4,10 @@
 //! can be restored from an older backup.
 //! The journal is the payout record that survives both: a coin listed here is
 //! never paid again, whatever the DB says. One line per paid coin:
-//! `<vtxo_id> <txid> <raw tx hex>`, written and fsynced before the tx is
-//! broadcast, so a restore can still broadcast a tx the DB no longer has.
-//! Lines without the raw tx (older journals) are read too.
+//! `<vtxo_id> <txid>`, written and fsynced before the tx is broadcast. The
+//! first line of each tx also carries `<raw tx hex>` (once per tx, not per
+//! coin: a batch tx is large), so a restore can still broadcast a tx the DB
+//! no longer has.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -57,8 +58,8 @@ impl Journal {
 	pub fn record(&mut self, vtxo_ids: &[String], txid: &str, raw: &[u8]) -> anyhow::Result<()> {
 		let hex = bitcoin::hex::DisplayHex::to_lower_hex_string(raw);
 		let mut f = OpenOptions::new().create(true).append(true).open(&self.path)?;
-		for id in vtxo_ids {
-			writeln!(f, "{id} {txid} {hex}")?;
+		for (i, id) in vtxo_ids.iter().enumerate() {
+			if i == 0 { writeln!(f, "{id} {txid} {hex}")? } else { writeln!(f, "{id} {txid}")? }
 		}
 		f.sync_all()?;
 		for id in vtxo_ids {
@@ -83,6 +84,7 @@ mod tests {
 		let j2 = Journal::open(&p).unwrap();
 		assert!(j2.contains("a:0") && j2.contains("b:1") && !j2.contains("c:0"));
 		assert_eq!(j2.raw_tx("b:1"), Some(vec![1, 2]));
+		assert_eq!(std::fs::read_to_string(&p).unwrap(), "a:0 tx1 0102\nb:1 tx1\n");
 		std::fs::remove_file(&p).unwrap();
 	}
 }

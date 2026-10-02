@@ -95,8 +95,12 @@ async fn tick(
 	// crash window between storing a tx and journaling it), and any journaled
 	// coin that is live again in captaind (DB restore) is re-marked spent
 	// before a user can refresh it. Scans the whole journal every tick.
-	for (id, txid, raw) in db::paid_ids(db).await? {
-		if !journal.contains(&id) { journal.record(&[id], &txid, &raw)? }
+	let mut unjournaled: BTreeMap<String, Vec<String>> = BTreeMap::new();
+	for (id, txid) in db::paid_ids(db).await? {
+		if !journal.contains(&id) { unjournaled.entry(txid).or_default().push(id) }
+	}
+	for (txid, ids) in unjournaled {
+		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
 	}
 	for id in db::resurrected(db, &journal.ids()).await? {
 		let flipped = db::reassert_paid(db, &id).await?;
