@@ -86,6 +86,17 @@ services:
     volumes: ["wallets:/wallets"]
     profiles: [cli]
 
+  # barkd of the bark fork (variant-b) for bark-web, profile web:
+  #   docker compose --profile web up -d barkd     (API on 127.0.0.1:43000, no auth)
+  barkd:
+    image: abandon-ship/bark:variant-b
+    command: [barkd, --host, 0.0.0.0, --port, "3000", --dangerously-allow-remote-no-auth]
+    volumes: ["barkd:/root/.bark"]
+    ports: ["127.0.0.1:43000:3000"]
+    depends_on:
+      captaind: {condition: service_healthy}
+    profiles: [web]
+
 volumes:
   bitcoin:
   postgres:
@@ -93,3 +104,4 @@ volumes:
   captaind:
   watchmand:
   wallets:
+  barkd:
