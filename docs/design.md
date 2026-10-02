@@ -30,11 +30,4 @@ Process: one instance (Postgres advisory lock); the captaind schema version is a
 - **Reorgs:** a payout is not re-checked after 6 confirmations; a deeper reorg that drops it goes unnoticed.
 - **No RBF bump:** a payout stuck at a low fee is rebroadcast but not bumped.
 - **Client side:** captaind does not tell wallets that a coin was paid out. A wallet must ask (`GetVtxoStatus`), find the payout at `tr(coin key)`, and sweep it. Until it does, the coin still appears in its balance and refreshes of it are refused.
-- **Dependence on captaind's DB:** column names, `spend_state` values and the stored VTXO encoding are captaind internals. The schema allowlist plus an upgrade check (audit every `UPDATE vtxo`, rerun `tests/regtest/`) are required before each captaind upgrade.
-
-## Operational notes
-
-- **captaind needs a restart policy:** rare races and some chain events make it exit.
-- **The payout wallet** must be the only wallet on its bitcoind, loaded on startup, with `txindex=1`.
-- **Back up the journal** separately from captaind's database.
-- **DB restore:** start the sidecar before captaind (`deployment.md`).
+- **Dependence on captaind's DB:** column names, `spend_state` values and the stored VTXO encoding are captaind internals; every captaind upgrade goes through the gate in `deployment.md`.

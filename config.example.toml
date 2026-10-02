@@ -1,7 +1,7 @@
 # Copy to config.toml (git-ignored). Values below are regtest examples.
 network = "regtest"
 journal_path = "/var/lib/abandon-ship/payouts.journal"  # local disk, back up separately
-poll_interval_secs = 10
+poll_interval_secs = 10   # seconds between ticks
 
 [postgres]
 # captaind's database, with captaind's DB role.
@@ -19,12 +19,12 @@ pass = "<rpcpassword>"
 # The watchman sweep address(es) (watchmand `sweep_address`). A funding
 # output counts as swept only if its spender pays nothing else.
 sweep_addresses = ["bcrt1q..."]
-grace_blocks = 1008          # G after expiry before a payout (7 days)
+grace_blocks = 1008          # blocks after expiry before a payout (7 days)
 sweep_min_confs = 100        # depth of the wholesale sweep
 ban_blocks = 6               # short: covers the wait + claim; never shortens an operator ban
 ban_wait_secs = 120          # >= round interval + offboard_session_timeout
-max_batch = 100
-payout_conf_target = 6
+max_batch = 100              # claims per tick (and coins per payout tx)
+payout_conf_target = 6       # estimatesmartfee target; no estimate, no payout
 max_fee_pct_per_payout = 20  # pay on-chain only if the fee share <= 20% of the coin
 max_quarantine_per_tick = 10  # circuit breaker
 min_payout_sat = 10000        # never pay on-chain below this; smaller coins stay refreshable

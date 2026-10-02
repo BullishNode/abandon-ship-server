@@ -14,10 +14,10 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
    - every paid ledger row is in the journal;
    - a journaled coin that is spendable again in captaind (DB restore) is set back to spent, quarantined, and its journaled payout tx is broadcast again (a no-op if already known).
 3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
-4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, not paid, not quarantined. If unpaid claims exist, pay those first and claim nothing new.
+4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat`, not paid, not quarantined. If unpaid claims exist, pay those first and claim nothing new.
 5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
-   1. **Decode.** Amount, key, expiry and anchor come from the stored VTXO. An undecodable one is quarantined.
-   2. **Amount.** Skip if below `min_payout_sat`, or if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
+   1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
+   2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
    3. **Sweep.** The anchor (round funding output) must be spent by a tx paying only the configured `sweep_addresses` (ignoring OP_RETURN and P2A), buried `sweep_min_confs`. A tree tx spending it means the round was partially unrolled: quarantine.
    4. **In flight.** Skip while a round participation still references the coin.
    5. **Ban, then wait.** Set `banned_until_height`, then wait `ban_wait_secs`. The claim needs that exact ban still in place: if an operator lifts it, the wait restarts.
@@ -39,26 +39,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 
 ## Config
 
-See `config.example.toml`. The keys:
-
-| Key | Meaning |
-| --- | --- |
-| `journal_path` | local payout journal |
-| `postgres.conninfo` | captaind's database |
-| `postgres.allowed_schema_versions` | allowlisted captaind schema versions |
-| `bitcoind.url` | the payout wallet |
-| `sweep_addresses` | where the watchman sweeps |
-| `grace_blocks` | wait after expiry before paying |
-| `sweep_min_confs` | required sweep depth |
-| `ban_blocks` | length of the ban the sidecar sets |
-| `ban_wait_secs` | wait after banning, before claiming |
-| `max_batch` | coins per payout batch |
-| `payout_conf_target` | confirmation target for the fee estimate |
-| `max_fee_pct_per_payout` | maximum fee share per coin |
-| `min_payout_sat` | smallest coin paid on-chain |
-| `max_quarantine_per_tick` | circuit breaker |
-
-On mainnet, `sweep_min_confs ≥ 100` and `grace_blocks ≥ 144`.
+`config.example.toml`, with a comment per key. On mainnet, `sweep_min_confs ≥ 100` and `grace_blocks ≥ 144`.
 
 ## Run
 
@@ -79,7 +60,6 @@ Tables: apply `migrations/0001_sidecar.sql` once. Setup and runbooks: `docs/depl
 | `src/chain.rs` | bitcoind JSON-RPC (untyped) |
 | `src/checks.rs` | fee rule, sweep detection, payout verification (pure, unit-tested) |
 | `src/journal.rs` | append-only payout journal |
-| `src/payout.rs` | BIP86 payout address |
 | `examples/coin_key_descriptor.rs` | prints `tr(xprv/350'/0'/*)` from a Bark mnemonic, to spend payouts without Bark |
 | `regtest/` | docker stack and helper scripts |
 | `tests/regtest/` | end-to-end scenarios |

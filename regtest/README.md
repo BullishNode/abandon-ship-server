@@ -23,9 +23,7 @@ Docker stack for testing: `bitcoind` (Core 31, no `-fallbackfee`), `postgres`, `
 | `./psql …` | captaind's DB as the superuser |
 | `./captaind …` | captaind CLI (`rpc wallet`, `rpc ban …`) |
 | `./coins` | user coins as captaind sees them |
-| `./newround <sat> <wallet>…` | board, then refresh the wallets into a round |
 | `./mineto <height>` | mine to a height |
 | `./seed-fees [blocks]` | fee-paying txs, so the estimator has data |
-| `./h2probe.sh <wallet> [secs]` | flip a coin to spent inside a round's submit window |
 
 `sidecar.toml`, `watchmand.toml` and `payouts.journal` are git-ignored.
