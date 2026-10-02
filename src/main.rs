@@ -37,6 +37,8 @@ enum Outcome {
 	Lost,
 	/// Never touched again automatically.
 	Quarantine(String),
+	/// Quarantine: the round was partially unrolled by this tx.
+	Unrolled(String),
 }
 
 #[tokio::main]
@@ -127,26 +129,30 @@ async fn tick(
 		.filter(|c| checks::affordable(c.amount_sat, share, p.max_fee_pct_per_payout)).count() as i64;
 	let mut claims_left = p.max_batch - payable;
 	let mut quarantined: u64 = 0;
+	let mut unrolled = std::collections::HashSet::new();
 	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, p.min_payout_sat).await? {
 		if claims_left <= 0 { break }
 		if journal.contains(&c.vtxo_id) { continue } // handled above
-		match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
-			Outcome::Quarantine(reason) => {
-				quarantined += 1;
-				if quarantined > p.max_quarantine_per_tick {
-					// Many failures at once smell like an encoding/schema change,
-					// not bad coins: stop instead of quarantining everything.
-					return Err(InvariantViolation(format!(
-						"more than {} quarantines in one tick (last: {reason})", p.max_quarantine_per_tick)).into());
-				}
-				warn!(vtxo = %c.vtxo_id, %reason, "quarantined");
-				db::quarantine(db, &c.vtxo_id, &reason).await?;
-			},
-			Outcome::Claimed => { claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed") },
-			Outcome::Lost => info!(vtxo = %c.vtxo_id, "user redeemed first; skipped"),
-			Outcome::Banned => info!(vtxo = %c.vtxo_id, "banned; waiting before claim"),
-			Outcome::Wait(why) => tracing::debug!(vtxo = %c.vtxo_id, why, "waiting"),
+		let (reason, fault) = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
+			Outcome::Quarantine(reason) => (reason, true),
+			// A partial exit quarantines every coin of its round: one fault.
+			Outcome::Unrolled(spender) => (format!("round partially unrolled by {spender}"), unrolled.insert(spender)),
+			Outcome::Claimed => { claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed"); continue },
+			Outcome::Lost => { info!(vtxo = %c.vtxo_id, "user redeemed first; skipped"); continue },
+			Outcome::Banned => { info!(vtxo = %c.vtxo_id, "banned; waiting before claim"); continue },
+			Outcome::Wait(why) => { tracing::debug!(vtxo = %c.vtxo_id, why, "waiting"); continue },
+		};
+		if fault {
+			quarantined += 1;
+			if quarantined > p.max_quarantine_per_tick {
+				// Many failures at once smell like an encoding/schema change,
+				// not bad coins: stop instead of quarantining everything.
+				return Err(InvariantViolation(format!(
+					"more than {} quarantines in one tick (last: {reason})", p.max_quarantine_per_tick)).into());
+			}
 		}
+		warn!(vtxo = %c.vtxo_id, %reason, "quarantined");
+		db::quarantine(db, &c.vtxo_id, &reason).await?;
 	}
 
 	pay_claimed(cfg, db, chain, journal, fee_rate).await
@@ -191,7 +197,7 @@ async fn process_coin(
 		// most likely a wrong sweep_addresses config: wait, never quarantine
 		// en masse because of a config mistake.
 		if db::is_tree_tx(db, &spender).await? {
-			return Ok(Outcome::Quarantine(format!("round partially unrolled by {spender}")));
+			return Ok(Outcome::Unrolled(spender));
 		}
 		warn!(vtxo = %c.vtxo_id, %spender, "anchor spender pays outside sweep_addresses; check config");
 		return Ok(Outcome::Wait("spender pays outside sweep_addresses"));

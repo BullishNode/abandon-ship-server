@@ -18,7 +18,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
    1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
    2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
-   3. **Sweep.** The anchor (round funding output) must be spent by a tx paying only the configured `sweep_addresses` (ignoring OP_RETURN and P2A), buried `sweep_min_confs`. A tree tx spending it means the round was partially unrolled: quarantine.
+   3. **Sweep.** The anchor (round funding output) must be spent by a tx paying only the configured `sweep_addresses` (ignoring OP_RETURN and P2A), buried `sweep_min_confs`. A tree tx spending it means the round was partially unrolled: quarantine (all its coins count as one quarantine for `max_quarantine_per_tick`).
    4. **In flight.** Skip while a round participation still references the coin.
    5. **Ban, then wait.** Set `banned_until_height`, then wait `ban_wait_secs`. The claim needs that exact ban still in place: if an operator lifts it, the wait restarts.
    6. **Claim.** In one transaction: `UPDATE vtxo SET spend_state='spent' WHERE … spend_state IN ('spendable','unclaimed') AND <our ban>`, then insert the payout row.
