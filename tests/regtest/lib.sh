@@ -9,7 +9,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 R=$ROOT/regtest
-BIN=$ROOT/target/debug/abandon-ship-server
+BIN=${BIN:-$ROOT/target/debug/abandon-ship-server} # BIN=<mutant build> to mutation-test a scenario
 JOURNAL=$R/payouts.journal
 NAME=$(basename "$0" .sh)
 RUN=${RUN:-$(date +%s)}
@@ -123,10 +123,10 @@ newwallet() {
 wname() { echo "t-$NAME-$RUN-$1"; }
 
 # After many blocks captaind's chain view lags bitcoind's, and it refuses
-# boards ("requested VTXO lifetime ... is too high"): wait (max 3 min) until it
-# has processed the tip.
+# boards ("requested VTXO lifetime ... is too high"): wait (max 10 min; it
+# processes about one block a second) until it has processed the tip.
 captaind_synced() {
-	local i; for i in $(seq 90); do [ "$(q "SELECT max(height) FROM captaind_block")" -ge "$(tip)" ] && return 0; sleep 2; done
+	local i; for i in $(seq 300); do [ "$(q "SELECT max(height) FROM captaind_block")" -ge "$(tip)" ] && return 0; sleep 2; done
 	say "captaind still behind the tip"; return 1
 }
 

@@ -20,6 +20,8 @@ check "A holds a new spendable coin" test -n "$(coins "$A")"
 tick
 check "B and C banned" eq "$(q "SELECT count(*) FROM sidecar.ban WHERE vtxo_id IN ('$XB','$XC')")" 2
 check "A not banned" eq "$(bans "$XA")" 0
+tick
+check "no claim inside the ban wait" eq "$(payout_state "$XB")$(payout_state "$XC")" ""
 "$R/bark" "$B" refresh --vtxo "$XB" > "$LOG/refresh-b.log" 2>&1; RB=$?
 "$R/bark" "$C" refresh --delegated --vtxo "$XC" > "$LOG/refresh-c.log" 2>&1; RC=$?
 mine 1

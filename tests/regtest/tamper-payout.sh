@@ -1,7 +1,8 @@
 #!/bin/bash
 # The sidecar's ledger loses a payout (bug or partial restore):
 # - a paid row reset to 'claimed' -> journal: the sidecar stops;
-# - a paid row deleted            -> the coin is spent: no repay.
+# - a paid row deleted            -> the coin is spent: no repay;
+# - a paid coin also spent in Ark -> invariant check: the sidecar stops.
 . "$(dirname "$0")/lib.sh"
 mkcfg
 expired_coin 80000
@@ -28,4 +29,10 @@ q "INSERT INTO sidecar.payout (vtxo_id, anchor_point, amount_sat, address, state
 tick
 check "one payout tx ever sent to tr(key)" eq "$(wallet_sends_to "$TRA")" 1
 check "journaled once" eq "$(journaled "$X")" 1
+
+q "UPDATE vtxo SET oor_spent_txid='$S_TXID' WHERE vtxo_id='$X'" > /dev/null
+tick; RC=$?
+q "UPDATE vtxo SET oor_spent_txid=NULL WHERE vtxo_id='$X'" > /dev/null
+check "paid coin spent in Ark: sidecar stops (exit $RC)" test $RC -ne 0
+check "paid coin spent in Ark: reason" grep -q "invariant violated for 1 payout row" "$LOG/tick.log"
 finish

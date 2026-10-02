@@ -256,3 +256,28 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 | 153 | The sidecar is first deployed on a captaind that has run for years | Every historic expired, unrefreshed coin ≥ the fee threshold is paid, oldest first, in batches | n/a: the candidate query has no age limit; oldest expiry first |
 | 154 | Blocks arrive faster than the ban wait (ban lapses before `ban_wait_secs` ends) | Re-banned each tick, never claimed while the burst lasts | n/a: mainnet `ban_blocks` spans hours, the wait spans minutes |
 | 155 | Failed rounds leave participations unforfeited for months | Coins in them would wait forever | pass (data): the 16 unforfeited participations in the regtest DB hold only coins that were refreshed |
+
+## Batch 17: "Mutate it" (disable one guard at a time; some scenario must fail)
+
+Each mutant is built from a scratch copy of `src/` with one guard removed, and the named scenario is run against it with `BIN=<mutant> tests/regtest/<scenario>.sh`.
+
+| # | Case | Expected | Status |
+| --- | --- | --- | --- |
+| 156 | Mutant: no `sweep_min_confs` check; the sweep is shallower than required | No ban until the sweep is deep enough | todo |
+| 157 | Mutant: no in-round check before the ban; the coin is in an open round participation | No ban while it is in the round | todo |
+| 158 | Mutant: no in-round check before the claim; the coin joins a round during the ban wait | No claim while it is in the round | todo |
+| 159 | Mutant: no ban wait; a second tick runs right after the ban | No claim before `ban_wait_secs` | todo |
+| 160 | Mutant: the claim does not require our ban intact; an operator unban commits while the claim waits on the row lock | The claim loses; the coin stays spendable | todo |
+| 161 | Mutant: no invariant check; a paid coin is also spent in Ark | The sidecar stops | todo |
+| 162 | Mutant: the built payout is not verified; the payout wallet holds only small UTXOs, so the real fee share is above `max_fee_pct_per_payout` | Payout deferred, nothing stored or broadcast; paid once a large UTXO is back | todo |
+| 163 | Mutant: no `gettxout` check that the funding output is spent | Some scenario fails | todo |
+| 164 | Mutant: no journal skip in the candidate loop | Some scenario fails | todo |
+| 165 | Mutant: change output not checked as the wallet's own | Some scenario fails | todo |
+| 166 | Mutant: `is_sweep` always true; a partially unrolled round | Its coins are quarantined, never paid | todo |
+| 167 | Mutant: a fallback rate when bitcoind has no estimate | No ban, no claim, no payout | todo |
+| 168 | Mutant: the claim ignores `spend_state`; captaind's spend commits while the claim waits | The claim loses | todo |
+| 169 | Mutant: broadcast before the journal append; the journal is unwritable | Nothing broadcast | todo |
+| 170 | Mutant: no leader lock; a second instance starts | The second exits | todo |
+| 171 | Mutant: no schema check after startup; captaind is upgraded under a running loop | The loop stops | todo |
+| 172 | Mutant: the circuit breaker never trips; many undecodable coins | The sidecar stops after `max_quarantine_per_tick` | todo |
+| 173 | Client mutant: the bark-web payout total counts an output once per coin; two coins share a key | The total counts the output once | todo |

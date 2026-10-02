@@ -3,6 +3,7 @@
 # - operator unbans during the wait: the wait restarts, no claim;
 # - operator re-bans with another (longer) height: no claim while it holds;
 # - our ban lapses (blocks mined past it): the wait restarts, no claim;
+# - operator unbans while the claim waits on the coin's row lock: claim lost;
 # - with our ban intact and aged: claimed and paid.
 . "$(dirname "$0")/lib.sh"
 mkcfg
@@ -31,6 +32,12 @@ mine $(( UNTIL - $(tip) )); ensure_fees
 sleep $WAIT; tick
 no_claim "our ban lapsed"
 check "lapsed: re-banned, wait restarted" test "$(banned_at)" != "$T2"
+
+sleep $WAIT
+"$R/psql" -c "BEGIN; UPDATE vtxo SET banned_until_height=NULL, updated_at=NOW() WHERE vtxo_id='$X'; SELECT pg_sleep(10); COMMIT;" > "$LOG/hold.log" 2>&1 & H=$!
+sleep 2; tick; wait $H
+check "unban while the claim waits: claim lost" grep -q "user redeemed first; skipped vtxo=$X" "$LOG/tick.log"
+no_claim "unban while the claim waits"
 
 check "intact ban: paid" pay_until "$X" 3
 assert_paid "$X" "$PK" "$AMT"
