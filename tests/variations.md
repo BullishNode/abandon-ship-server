@@ -32,7 +32,6 @@ Variations of the regtest scenarios. Status: `todo` unless noted. DB writers, ma
 | # | Variation |
 | --- | --- |
 | B5 | Sweep tx RBF'd by the watchman before confirming (txid changes) |
-| B8 | Mempool full / min relay fee above the payout feerate |
 | B9 | `txindex` disabled on bitcoind (anchor fetch fails for all: must wait, not quarantine) |
 | B10 | Pruned node |
 | B11 | bitcoind restarted with `-persistmempool=0` and the payout wallet unloaded |

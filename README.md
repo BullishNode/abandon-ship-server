@@ -28,15 +28,6 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
    - store it in the DB, then append it to the journal (one line per coin, the raw tx once per tx; fsync), then broadcast.
 7. **Invariants.** Every paid coin is `spent` with no round, arkoor or offboard spend recorded, and no paid coin row is missing. A violation exits the process.
 
-## Why a coin cannot be paid twice
-
-| Second redemption | Prevented by |
-| --- | --- |
-| Refresh, offboard, arkoor or Lightning in Ark | captaind commits every spend with a conditional `spend_state` update before releasing a signature, preimage or broadcast (`tree.rs`, `forfeit.rs`, `arkoor.rs`, `offboards.rs`); the claim uses the same condition |
-| Unilateral exit | payout only after the anchor is swept wholesale, `sweep_min_confs` deep |
-| DB restore | local journal (with the raw tx), invariant check |
-| Retries, crashes | `payout.vtxo_id` is unique; tx stored before broadcast; rebroadcast reuses it |
-
 ## Config
 
 `config.example.toml`, with a comment per key. On mainnet, `sweep_min_confs ≥ 100` and `grace_blocks ≥ 144`.
@@ -62,5 +53,5 @@ Tables: apply `migrations/0001_sidecar.sql` once. Setup and runbooks: `docs/depl
 | `src/journal.rs` | append-only payout journal |
 | `examples/coin_key_descriptor.rs` | prints `tr(xprv/350'/0'/*)` from a Bark mnemonic, to spend payouts without Bark |
 | `regtest/` | docker stack and helper scripts |
-| `tests/regtest/` | end-to-end scenarios |
-| `tests/*.md` | edge-case catalogue |
+| `tests/regtest/` | end-to-end scenarios; `run-all.sh` runs them all |
+| `tests/*.md` | edge-case and variation catalogues, with status |
