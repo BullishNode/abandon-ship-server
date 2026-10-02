@@ -57,3 +57,4 @@ Stack: captaind/bark nightly-2026-10-01 (master 6768e0fb4), Bitcoin Core 31.0, `
 
   So they cannot be fully verified, and they go to manual review with an explicit reason. An unverified automatic payout would reopen T1. **AC?** Upstream ask to Second: a validation that verifies everything except the unsigned final hArk step. Then A1 coins can be auto-paid.
 - **O25.** **A panic from external data:** `row.get` on `unlock_preimage` (TEXT, not BYTEA) crashed the process. Fixed: every DB read is `try_get`, and no `unwrap`/`expect` remains on external data.
+- **O26.** Owner ruling (2026-10-02): no feerate cap. The fee rule is a per-coin percentage (`max_fee_pct_per_payout`) plus a minimum amount (`min_payout_sat`). The percentage bounds what any coin loses to fees even with an absurd estimate.

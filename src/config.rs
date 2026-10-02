@@ -35,9 +35,10 @@ pub struct Policy {
 	pub ban_wait_secs: u64,
 	pub max_batch: i64,
 	pub payout_conf_target: u16,
-	pub max_fee_rate_sat_vb: f64,
 	/// Pay a coin on-chain only if its fee share is at most this % of its value.
 	pub max_fee_pct_per_payout: u64,
+	/// Never pay a coin on-chain below this amount (it stays refreshable).
+	pub min_payout_sat: u64,
 }
 
 impl Config {
@@ -47,6 +48,7 @@ impl Config {
 		anyhow::ensure!(!cfg.policy.sweep_addresses.is_empty(), "policy.sweep_addresses is empty");
 		anyhow::ensure!(!cfg.postgres.allowed_schema_versions.is_empty(), "no allowed captaind schema versions");
 		anyhow::ensure!((1..=99).contains(&cfg.policy.max_fee_pct_per_payout), "max_fee_pct_per_payout must be 1..=99");
+		anyhow::ensure!(cfg.policy.min_payout_sat >= 330, "min_payout_sat must be >= 330 (dust)");
 		// Floors that only regtest/signet may go below (#90, #105, #106, #115).
 		if cfg.network == bitcoin::Network::Bitcoin {
 			anyhow::ensure!(cfg.policy.sweep_min_confs >= 100, "sweep_min_confs must be >= 100 on mainnet");

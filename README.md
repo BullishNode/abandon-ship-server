@@ -33,8 +33,8 @@ Startup refuses to run if another instance holds the leader lock (T9), or if cap
 
 ## Additional guards (from testing; see `docs/observations.md`)
 
-- **Fee gate:** no claims unless bitcoind's real estimate (`estimatesmartfee`, no fallback rate) is within `max_fee_rate_sat_vb`. The payout is funded at exactly that rate.
-- **Per-coin fee rule:** pay a coin only if its fee share is at most `max_fee_pct_per_payout` (default 20%) of its value and at least 330 sat remain. Otherwise leave it alone, so its owner can still refresh it.
+- **Fee gate:** no claims and no payouts without bitcoind's real estimate (`estimatesmartfee`; no fallback rate, no feerate cap). The payout is funded at exactly that rate.
+- **Per-coin fee rule:** pay a coin only if it is at least `min_payout_sat`, its fee share is at most `max_fee_pct_per_payout` (default 20%) of its value, and at least 330 sat remain. Otherwise leave it alone, so its owner can still refresh it.
 - **Payout journal:** an append-only, fsynced file on the sidecar's own disk (`journal_path`). A journaled coin is never paid again. If one is live again in captaind (DB restore), it is re-marked spent and quarantined.
 - **Pay-time re-derivation:** each claimed row's address and amount are re-derived from the chain-validated VTXO before paying. Any mismatch stops the process.
 - **Our ban must be intact:** the claim requires the exact ban the sidecar set. An operator unban restarts the wait (prevents H2).

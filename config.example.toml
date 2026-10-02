@@ -25,5 +25,5 @@ ban_blocks = 6               # short: covers the wait + claim; never shortens an
 ban_wait_secs = 120          # >= round interval + offboard_session_timeout
 max_batch = 100
 payout_conf_target = 6
-max_fee_rate_sat_vb = 50.0   # refuse to pay above this feerate
 max_fee_pct_per_payout = 20  # pay on-chain only if the fee share <= 20% of the coin
+min_payout_sat = 10000        # never pay on-chain below this; smaller coins stay refreshable

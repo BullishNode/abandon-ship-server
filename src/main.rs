@@ -141,18 +141,13 @@ async fn tick(
 	let p = &cfg.policy;
 	// bitcoind's real estimate only; no fallback rate, ever.
 	let fee_rate = chain.estimate_fee_rate(p.payout_conf_target).await?;
-	let can_claim = match fee_rate {
-		None => { warn!("no fee estimate: not claiming this tick"); false },
-		Some(r) if r > p.max_fee_rate_sat_vb => { warn!(rate = r, "fee estimate above cap: not claiming this tick"); false },
-		Some(_) => true,
+	// No estimate: no claims and no payouts this tick. There is no feerate
+	// cap: the per-coin percentage rule bounds what any coin can lose to fees,
+	// even if the estimate is absurd.
+	let Some(fee_rate) = fee_rate else {
+		warn!("no fee estimate: not claiming or paying this tick");
+		return Ok(());
 	};
-	if !can_claim {
-		return match fee_rate {
-			Some(r) if r <= p.max_fee_rate_sat_vb => pay_claimed(cfg, db, chain, journal, r).await,
-			_ => Ok(()),
-		};
-	}
-	let fee_rate = fee_rate.expect("checked");
 
 	// A7: never pile up claims. Pay what is claimed before claiming more.
 	if db::count_in_state(db, "claimed").await? > 0 {
@@ -185,8 +180,9 @@ async fn process_coin(
 
 	// Skip uneconomic coins before any work (the DB amount only skips; the
 	// validated amount decides payment below).
-	if !checks::affordable(c.db_amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
-		return Ok(Outcome::Wait("fee share above max_fee_pct_per_payout"));
+	if c.db_amount < p.min_payout_sat
+		|| !checks::affordable(c.db_amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
+		return Ok(Outcome::Wait("below min_payout_sat or fee share above max_fee_pct_per_payout"));
 	}
 
 	// T1: decode and validate the coin against the chain; trust nothing else.
@@ -215,8 +211,9 @@ async fn process_coin(
 	let amount = vtxo.amount().to_sat();
 	// Not worth paying on-chain at today's fee: leave it alone (no ban, no
 	// claim), so its owner can still refresh it. Re-checked every tick.
-	if !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
-		return Ok(Outcome::Wait("fee share above max_fee_pct_per_payout"));
+	if amount < p.min_payout_sat
+		|| !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
+		return Ok(Outcome::Wait("below min_payout_sat or fee share above max_fee_pct_per_payout"));
 	}
 	let Some(funding_out) = anchor_tx.output.get(anchor.vout as usize) else {
 		return Ok(Outcome::Quarantine("anchor vout missing".into()));
@@ -329,7 +326,7 @@ async fn pay_claimed(
 	let built = chain.build_payout(outputs, fee_rate).await?;
 	// T7/T8: refuse anything that is not exactly the intended payout.
 	let change = match checks::verify_payout(
-		&built.tx, &expected, built.fee_sat, cfg.policy.max_fee_rate_sat_vb, pct,
+		&built.tx, &expected, built.fee_sat, pct,
 	) {
 		Ok(c) => c,
 		Err(e) => {

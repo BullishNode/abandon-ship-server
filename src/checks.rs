@@ -47,21 +47,17 @@ pub fn is_sweep(spender: &Transaction, sweep_spks: &[ScriptBuf]) -> bool {
 /// Verify a built payout before it is stored:
 /// - every expected script gets exactly one output, worth at most the expected
 ///   amount and at least expected minus the whole fee;
-/// - at most one other output (change), which the caller checks is ours;
-/// - the fee is within the feerate and share caps.
+/// - every output's fee share is within `max_fee_pct` and leaves dust;
+/// - at most one other output (change), which the caller checks is ours.
 /// Returns the change output's script, if any.
 pub fn verify_payout(
 	tx: &Transaction,
 	expected: &[(ScriptBuf, u64)],
 	fee_sat: u64,
-	max_fee_rate_sat_vb: f64,
 	max_fee_pct: u64,
 ) -> anyhow::Result<Option<ScriptBuf>> {
 	let total: u64 = expected.iter().map(|(_, a)| a).sum();
 	anyhow::ensure!(total > 0, "empty payout");
-	let vsize = tx.vsize() as f64;
-	anyhow::ensure!(fee_sat as f64 / vsize <= max_fee_rate_sat_vb,
-		"feerate {:.2} sat/vB above cap", fee_sat as f64 / vsize);
 
 	let mut want: HashMap<&ScriptBuf, u64> = HashMap::new();
 	for (spk, amt) in expected {
@@ -127,14 +123,14 @@ mod tests {
 		let exp = vec![(spk(1), 10_000), (spk(2), 20_000)];
 		// fee 300 split 150/150, plus change
 		let ok = tx(vec![(spk(1), 9_850), (spk(2), 19_850), (spk(9), 5_000)]);
-		assert_eq!(verify_payout(&ok, &exp, 300, 1000.0, 20).unwrap(), Some(spk(9)));
+		assert_eq!(verify_payout(&ok, &exp, 300, 20).unwrap(), Some(spk(9)));
 		// overpay
-		assert!(verify_payout(&tx(vec![(spk(1), 10_001), (spk(2), 19_850)]), &exp, 300, 1000.0, 20).is_err());
+		assert!(verify_payout(&tx(vec![(spk(1), 10_001), (spk(2), 19_850)]), &exp, 300, 20).is_err());
 		// missing output
-		assert!(verify_payout(&tx(vec![(spk(1), 9_850)]), &exp, 300, 1000.0, 20).is_err());
+		assert!(verify_payout(&tx(vec![(spk(1), 9_850)]), &exp, 300, 20).is_err());
 		// two unknown outputs
-		assert!(verify_payout(&tx(vec![(spk(1), 9_850), (spk(2), 19_850), (spk(8), 1), (spk(9), 1)]), &exp, 300, 1000.0, 20).is_err());
+		assert!(verify_payout(&tx(vec![(spk(1), 9_850), (spk(2), 19_850), (spk(8), 1), (spk(9), 1)]), &exp, 300, 20).is_err());
 		// per-output share cap: 150 of 10_000 is 1.5%, fine at 20%, not at 1%
-		assert!(verify_payout(&ok, &exp, 300, 1000.0, 1).is_err());
+		assert!(verify_payout(&ok, &exp, 300, 1).is_err());
 	}
 }
