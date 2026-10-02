@@ -120,14 +120,15 @@ async fn tick(
 		return Ok(());
 	};
 
-	// Never pile up claims. Pay what is claimed before claiming more.
-	if !db::payouts_in_state(db, "claimed").await?.is_empty() {
-		return pay_claimed(cfg, db, chain, journal, fee_rate).await;
-	}
-	let mut claims_left = p.max_batch;
+	// Never pile up claims: claimed coins payable at this rate take up the
+	// batch. Ones that fees made unaffordable wait without blocking others.
+	let share = checks::fee_share_bound(fee_rate);
+	let payable = db::payouts_in_state(db, "claimed").await?.iter()
+		.filter(|c| checks::affordable(c.amount_sat, share, p.max_fee_pct_per_payout)).count() as i64;
+	let mut claims_left = p.max_batch - payable;
 	let mut quarantined: u64 = 0;
 	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, p.min_payout_sat).await? {
-		if claims_left == 0 { break }
+		if claims_left <= 0 { break }
 		if journal.contains(&c.vtxo_id) { continue } // handled above
 		match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
 			Outcome::Quarantine(reason) => {

@@ -14,7 +14,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
    - every paid ledger row is in the journal;
    - a journaled coin that is spendable again in captaind (DB restore) is set back to spent, quarantined, and its journaled payout tx is broadcast again (a no-op if already known).
 3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
-4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat`, not paid, not quarantined. If unpaid claims exist, pay those first and claim nothing new.
+4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat`, not paid, not quarantined. Claimed coins still payable at the current rate count against `max_batch`; ones that fees made unaffordable wait without blocking new claims.
 5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
    1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
    2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
