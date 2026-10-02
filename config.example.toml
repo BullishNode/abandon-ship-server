@@ -4,16 +4,16 @@ journal_path = "/var/lib/abandon-ship/payouts.journal"  # local disk, back up se
 poll_interval_secs = 10
 
 [postgres]
-# captaind's database, with the least-privilege role from docs/deployment.md.
-conninfo = "host=127.0.0.1 port=5432 user=sidecar password=sidecar-regtest dbname=bark-server"
+# captaind's database, with captaind's DB role.
+conninfo = "host=127.0.0.1 port=5432 user=postgres password=<secret> dbname=bark-server"
 # captaind schema versions (refinery) the upgrade gate has signed off.
 allowed_schema_versions = [0]
 
 [bitcoind]
-# Dedicated payout wallet; the RPC user is restricted by rpcwhitelist.
+# Dedicated payout wallet, with the node's RPC credentials.
 url = "http://127.0.0.1:38443/wallet/payout"
-user = "sidecar"
-pass = "sidecar-regtest"
+user = "<rpcuser>"
+pass = "<rpcpassword>"
 
 [policy]
 # The watchman sweep address(es) (watchmand `sweep_address`). A funding
