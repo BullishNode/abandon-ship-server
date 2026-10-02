@@ -211,7 +211,7 @@ async fn tick(
 	}
 	let mut claims_left = p.max_batch;
 	let mut quarantined: u64 = 0;
-	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch).await? {
+	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, p.min_payout_sat).await? {
 		if claims_left == 0 { break }
 		if journal.contains(&c.vtxo_id) { continue } // handled above
 		match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {

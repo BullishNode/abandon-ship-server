@@ -64,9 +64,11 @@ pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
 	Ok(())
 }
 
-/// Expired, unpaid, unquarantined, spendable user coins past the grace period.
-/// The `expiry` column is only a pre-filter; the validated VTXO decides.
-pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64) -> anyhow::Result<Vec<Candidate>> {
+/// Expired, unpaid, unquarantined, spendable user coins past the grace period,
+/// of at least `min_amount` (filtered before the limit, so small coins never
+/// fill the window). The `expiry` and `amount` columns are only pre-filters;
+/// the validated VTXO decides.
+pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64) -> anyhow::Result<Vec<Candidate>> {
 	let rows = db.query("
 		SELECT v.vtxo_id, v.vtxo, v.amount
 		FROM vtxo v
@@ -75,11 +77,12 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64) -> anyhow
 		  AND v.spend_state IN ('spendable', 'unclaimed')
 		  AND v.confirmed_height IS NULL
 		  AND v.expiry::bigint + $1::bigint <= $2::bigint
+		  AND v.amount >= $4::bigint
 		  AND NOT EXISTS (SELECT 1 FROM sidecar.payout p WHERE p.vtxo_id = v.vtxo_id)
 		  AND NOT EXISTS (SELECT 1 FROM sidecar.quarantine q WHERE q.vtxo_id = v.vtxo_id)
 		ORDER BY v.expiry
 		LIMIT $3::bigint * 20
-	", &[&(grace as i64), &(tip as i64), &limit]).await?;
+	", &[&(grace as i64), &(tip as i64), &limit, &(min_amount as i64)]).await?;
 	rows.into_iter()
 		.map(|r| Ok(Candidate {
 			vtxo_id: r.try_get("vtxo_id")?,
