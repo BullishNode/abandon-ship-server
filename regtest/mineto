@@ -1,0 +1,3 @@
+#!/bin/sh
+# ./mineto <height>
+cd "$(dirname "$0")"; t=$(./btc getblockcount); [ "$1" -gt "$t" ] && ./btc -rpcwallet=faucet -generate $(( $1 - t )) >/dev/null; ./btc getblockcount

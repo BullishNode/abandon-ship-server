@@ -1,0 +1,3 @@
+#!/bin/sh
+# Server view of user coins: id, amount, expiry, spend_state, banned_until, anchor
+cd "$(dirname "$0")" && ./psql -At -F' ' -c "SELECT left(vtxo_id,10), amount, expiry, spend_state, coalesce(banned_until_height::text,'-'), left(anchor_point,10) FROM vtxo WHERE policy_type='pubkey' AND spend_state<>'pool' ORDER BY spend_state, vtxo_id"

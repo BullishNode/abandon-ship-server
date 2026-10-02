@@ -1,0 +1,12 @@
+#!/bin/sh
+# Give bitcoind's fee estimator real data: fee-paying txs at a few feerates,
+# mined over many blocks. No -fallbackfee anywhere.
+cd "$(dirname "$0")"
+for b in $(seq 1 ${1:-30}); do
+  for r in 2 3 5; do
+    A=$(./btc -rpcwallet=faucet getnewaddress)
+    ./btc -rpcwallet=faucet -named sendtoaddress address=$A amount=0.001 fee_rate=$r >/dev/null
+  done
+  ./btc -rpcwallet=faucet -generate 1 >/dev/null
+done
+./btc estimatesmartfee 6

@@ -1,0 +1,11 @@
+#!/bin/bash
+# ./newround <sat> <wallet>...  board <sat> per wallet, then refresh all into one round
+set -e; cd "$(dirname "$0")"; amt=$1; shift
+for w in "$@"; do ./bark $w board "$amt sat" >/dev/null 2>&1; done
+./btc -rpcwallet=faucet -generate 4 >/dev/null
+for w in "$@"; do ./bark $w balance >/dev/null 2>&1; done
+pids=(); for w in "$@"; do ./bark $w refresh --all >/tmp/claude-1000/nr-$w.log 2>&1 & pids+=($!); done
+for p in "${pids[@]}"; do wait $p || true; done
+./btc -rpcwallet=faucet -generate 3 >/dev/null
+for w in "$@"; do ./bark $w balance >/dev/null 2>&1; done
+grep -h -o '"funding_txid": "[0-9a-f]*"' /tmp/claude-1000/nr-*.log | sort -u

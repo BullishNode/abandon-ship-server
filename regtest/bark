@@ -1,0 +1,4 @@
+#!/bin/sh
+# ./bark <wallet> <cmd> ...   (wallet = u1, u2, ...)
+w="$1"; shift
+cd "$(dirname "$0")" && exec docker compose --profile cli run --rm -T bark --datadir "/wallets/$w" "$@"

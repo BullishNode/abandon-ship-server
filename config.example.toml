@@ -1,0 +1,29 @@
+# Copy to config.toml (git-ignored). Values below are regtest examples.
+network = "regtest"
+journal_path = "/var/lib/abandon-ship/payouts.journal"  # local disk, back up separately
+poll_interval_secs = 10
+
+[postgres]
+# captaind's database, with the least-privilege role from docs/deployment.md.
+conninfo = "host=127.0.0.1 port=5432 user=sidecar password=sidecar-regtest dbname=bark-server"
+# captaind schema versions (refinery) the upgrade gate has signed off.
+allowed_schema_versions = [0]
+
+[bitcoind]
+# Dedicated payout wallet; the RPC user is restricted by rpcwhitelist.
+url = "http://127.0.0.1:38443/wallet/payout"
+user = "sidecar"
+pass = "sidecar-regtest"
+
+[policy]
+# Bull's watchman sweep address(es) (watchmand `sweep_address`). A funding
+# output counts as swept only if its spender pays nothing else.
+sweep_addresses = ["bcrt1q..."]
+grace_blocks = 1008          # G after expiry before a payout (7 days)
+sweep_min_confs = 100        # depth of the wholesale sweep
+ban_blocks = 6               # short: covers the wait + claim; never shortens an operator ban
+ban_wait_secs = 120          # >= round interval + offboard_session_timeout
+max_batch = 100
+payout_conf_target = 6
+max_fee_rate_sat_vb = 50.0   # refuse to pay above this feerate
+max_fee_pct_per_payout = 20  # pay on-chain only if the fee share <= 20% of the coin
