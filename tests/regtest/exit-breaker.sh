@@ -1,8 +1,9 @@
 #!/bin/bash
-# One owner's partial exit unrolls a round: every remaining coin of that round
-# is quarantined. That is one on-chain fact, not many failures: it must not
-# trip the circuit breaker (max_quarantine_per_tick=1) and stop payouts of
-# other rounds (Z).
+# T's exit (an arkoor coin, two steps deep) is started, its first step
+# confirms, then it is cancelled before the final tx. The round is partially
+# unrolled: T's coin and every other coin left in it are quarantined, never
+# paid. That is one on-chain fact, not many failures: it must not trip the
+# circuit breaker (max_quarantine_per_tick=1) and stop payouts of other rounds (Z).
 . "$(dirname "$0")/lib.sh"
 mkcfg max_quarantine_per_tick=1
 A=$(wname a); B=$(wname b); C=$(wname c); T=$(wname exiter); Z=$(wname z)
@@ -21,12 +22,13 @@ round 60000 "$Z"
 XA=$(coins "$A"); XB=$(coins "$B"); XC=$(coins "$C"); XZ=$(coins "$Z")
 read -r PKZ AMTZ <<< "$(coininfo "$Z" "$XZ")"
 check "round unrolled (funding output spent)" test -n "$(anchor_spender "$ANCHOR")"
+check "T's leaf never confirmed" test -z "$(leaf_confirmed "$X")"
 expire_and_sweep "$XA $XB $XC $XZ" || finish
 
 # Every user coin left in the unrolled round (a wallet whose refresh missed
 # the round keeps a board coin elsewhere: not part of it).
 UNR=$(q "SELECT vtxo_id FROM vtxo WHERE anchor_point='$ANCHOR' AND policy_type='pubkey' AND spend_state='spendable'")
-check "two or more coins left in the unrolled round" test "$(wc -w <<< "$UNR")" -ge 2
+check "T's coin and others left in the unrolled round" test "$(wc -w <<< "$UNR")" -ge 2 -a -n "$(grep -wF "$X" <<< "$UNR")"
 tick; RC=$?
 check "breaker not tripped (exit $RC)" test $RC -eq 0
 for x in $UNR; do
