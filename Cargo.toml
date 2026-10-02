@@ -11,10 +11,8 @@ ark-lib = { git = "https://gitlab.com/ark-bitcoin/bark.git", rev = "6768e0fb4f4f
 bitcoin = "0.32.7"
 bitcoincore-rpc = "0.19"
 
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tokio-postgres = "0.7"
-
-
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

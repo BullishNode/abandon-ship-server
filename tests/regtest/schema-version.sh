@@ -1,5 +1,5 @@
 #!/bin/bash
-# #26/T10: an unknown captaind schema version stops the sidecar: at startup,
+# An unknown captaind schema version stops the sidecar: at startup,
 # and under a running loop (captaind upgraded underneath it).
 . "$(dirname "$0")/lib.sh"
 mkcfg 'allowed_schema_versions=[66]'
@@ -15,6 +15,6 @@ RC=$(loop_exit 30)
 q "DELETE FROM refinery_schema_history WHERE version = 68 AND name = 'suite_fake_upgrade'" > /dev/null
 check "loop stops on 68 (exit $RC)" test "$RC" != running -a "$RC" != 0
 [ "$RC" = running ] && stop_loop
-check "reason" grep -q "captaind schema version changed to 68" "$LOG/loop.log"
+check "reason" grep -q "captaind schema version 68 not in allowed_schema_versions" "$LOG/loop.log"
 check "fake version removed" eq "$(q "SELECT max(version) FROM refinery_schema_history")" 67
 finish

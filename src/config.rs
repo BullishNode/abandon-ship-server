@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 pub struct Config {
 	pub network: bitcoin::Network,
 	/// Append-only payout journal on local disk (survives DB restores).
@@ -13,20 +13,20 @@ pub struct Config {
 	pub policy: Policy,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 pub struct Postgres {
 	pub conninfo: String,
 	pub allowed_schema_versions: Vec<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 pub struct Bitcoind {
 	pub url: String,
 	pub user: String,
 	pub pass: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 pub struct Policy {
 	pub sweep_addresses: Vec<String>,
 	pub grace_blocks: u32,

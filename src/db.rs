@@ -6,8 +6,7 @@ use tokio_postgres::{Client, NoTls};
 /// Advisory-lock key: only one sidecar instance may run against a database.
 const LEADER_LOCK: i64 = 0x41_42_41_4e_44_4f_4e; // "ABANDON"
 
-/// A row from captaind's `vtxo` table. Only `vtxo_id` and the encoded `vtxo`
-/// blob are used for decisions; the blob is validated against the chain.
+/// A row from captaind's `vtxo` table.
 pub struct Candidate {
 	pub vtxo_id: String,
 	pub vtxo: Vec<u8>,
@@ -17,8 +16,6 @@ pub struct Payout {
 	pub vtxo_id: String,
 	pub amount_sat: u64,
 	pub address: String,
-	pub txid: Option<String>,
-	pub raw_tx: Option<Vec<u8>>,
 }
 
 pub async fn connect(conninfo: &str) -> anyhow::Result<Client> {
@@ -180,15 +177,10 @@ pub async fn claim(
 	Ok(true)
 }
 
-pub async fn count_in_state(db: &Client, state: &str) -> anyhow::Result<i64> {
-	Ok(db.query_one("SELECT COUNT(*) AS n FROM sidecar.payout WHERE state = $1", &[&state]).await?.try_get("n")?)
-}
-
 /// Every coin id in the ledger with a txid (for journal reconciliation).
 pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, Vec<u8>)>> {
 	db.query("SELECT vtxo_id, txid, raw_tx FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
-		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?,
-			r.try_get::<_, Option<Vec<u8>>>("raw_tx")?.unwrap_or_default()))).collect()
+		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?, r.try_get("raw_tx")?))).collect()
 }
 
 /// Journaled coins that are spendable/unclaimed again in captaind (DB restore).
@@ -201,16 +193,20 @@ pub async fn resurrected(db: &Client, ids: &[String]) -> anyhow::Result<Vec<Stri
 
 pub async fn payouts_in_state(db: &Client, state: &str) -> anyhow::Result<Vec<Payout>> {
 	let rows = db.query(
-		"SELECT vtxo_id, amount_sat, address, txid, raw_tx FROM sidecar.payout WHERE state = $1 ORDER BY claimed_at",
+		"SELECT vtxo_id, amount_sat, address FROM sidecar.payout WHERE state = $1 ORDER BY claimed_at",
 		&[&state],
 	).await?;
 	rows.into_iter().map(|r| Ok(Payout {
 		vtxo_id: r.try_get("vtxo_id")?,
 		amount_sat: r.try_get::<_, i64>("amount_sat")? as u64,
 		address: r.try_get("address")?,
-		txid: r.try_get("txid")?,
-		raw_tx: r.try_get("raw_tx")?,
 	})).collect()
+}
+
+/// The stored txs of payouts in `state`, one per txid.
+pub async fn txs_in_state(db: &Client, state: &str) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+	db.query("SELECT DISTINCT txid, raw_tx FROM sidecar.payout WHERE state = $1 AND txid IS NOT NULL", &[&state])
+		.await?.into_iter().map(|r| Ok((r.try_get("txid")?, r.try_get("raw_tx")?))).collect()
 }
 
 /// Store the signed batch tx for these claims before it is broadcast.
@@ -225,11 +221,6 @@ pub async fn mark_signed(db: &mut Client, vtxo_ids: &[String], txid: &str, raw: 
 	Ok(())
 }
 
-pub async fn raw_tx_by_txid(db: &Client, txid: &str) -> anyhow::Result<Option<Vec<u8>>> {
-	let row = db.query_opt("SELECT raw_tx FROM sidecar.payout WHERE txid = $1 LIMIT 1", &[&txid]).await?;
-	Ok(row.and_then(|r| r.get::<_, Option<Vec<u8>>>("raw_tx")))
-}
-
 pub async fn set_state_by_txid(db: &Client, txid: &str, from: &str, to: &str) -> anyhow::Result<()> {
 	db.execute(
 		"UPDATE sidecar.payout SET state = $3, updated_at = NOW() WHERE txid = $1 AND state = $2",
@@ -238,7 +229,7 @@ pub async fn set_state_by_txid(db: &Client, txid: &str, from: &str, to: &str) ->
 	Ok(())
 }
 
-/// I2: every paid coin is spent, with no round/arkoor/offboard spend recorded.
+/// Every paid coin is spent, with no round/arkoor/offboard spend recorded.
 pub async fn check_invariants(db: &Client) -> anyhow::Result<()> {
 	let bad: i64 = db.query_one("
 		SELECT COUNT(*) AS n FROM sidecar.payout p
@@ -248,11 +239,11 @@ pub async fn check_invariants(db: &Client) -> anyhow::Result<()> {
 		   OR v.oor_spent_txid IS NOT NULL
 		   OR v.offboarded_in IS NOT NULL
 	", &[]).await?.try_get("n")?;
-	anyhow::ensure!(bad == 0, "invariant I2 violated for {bad} payout row(s)");
+	anyhow::ensure!(bad == 0, "invariant violated for {bad} payout row(s)");
 	let orphans: i64 = db.query_one(
 		"SELECT COUNT(*) AS n FROM sidecar.payout p WHERE NOT EXISTS (SELECT 1 FROM vtxo v WHERE v.vtxo_id = p.vtxo_id)",
 		&[],
 	).await?.try_get("n")?;
-	anyhow::ensure!(orphans == 0, "invariant I2 violated: {orphans} paid coin row(s) deleted from vtxo");
+	anyhow::ensure!(orphans == 0, "invariant violated: {orphans} paid coin row(s) deleted from vtxo");
 	Ok(())
 }

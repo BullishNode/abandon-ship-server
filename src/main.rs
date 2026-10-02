@@ -1,19 +1,19 @@
 //! abandon-ship-server: pays expired, unrefreshed Ark coins on-chain to the
-//! coin's own key. See README.md and docs/threat-model.md.
+//! coin's own key. See README.md and docs/design.md.
 
 mod chain;
 mod checks;
 mod config;
 mod db;
 mod journal;
-mod payout;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
 use ark::{ProtocolEncoding, Vtxo};
+use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, ScriptBuf, Txid};
 use tracing::{info, warn};
 
@@ -26,12 +26,6 @@ impl std::fmt::Display for InvariantViolation {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "invariant violated: {}", self.0) }
 }
 impl std::error::Error for InvariantViolation {}
-
-/// Decode a stored coin. Amount, key, expiry and anchor come from it; the DB
-/// is trusted (only captaind and the sidecar write it).
-fn decode(blob: &[u8]) -> Result<Vtxo, String> {
-	Vtxo::deserialize(blob).map_err(|e| format!("undecodable vtxo: {e}"))
-}
 
 /// What happened to one candidate coin this tick.
 enum Outcome {
@@ -64,10 +58,6 @@ async fn main() -> anyhow::Result<()> {
 	let mut db = db::connect(&cfg.postgres.conninfo).await?;
 	// Exactly one instance.
 	anyhow::ensure!(db::try_lead(&db).await?, "another sidecar instance holds the leader lock");
-	// Refuse unknown captaind schema versions.
-	let ver = db::captaind_schema_version(&db).await?;
-	anyhow::ensure!(cfg.postgres.allowed_schema_versions.contains(&ver),
-		"captaind schema version {ver} not in allowed_schema_versions; run the upgrade gate first");
 	db::check_tables(&db).await?;
 	let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
 	let mut journal = journal::Journal::open(&cfg.journal_path)?;
@@ -91,10 +81,10 @@ async fn tick(
 	cfg: &Config, sweep_spks: &[ScriptBuf], db: &mut tokio_postgres::Client, chain: &chain::Chain,
 	journal: &mut journal::Journal,
 ) -> anyhow::Result<()> {
-	// Every tick, not just at startup: captaind may be upgraded under us.
+	// Every tick: captaind may be upgraded under us.
 	let ver = db::captaind_schema_version(db).await?;
 	if !cfg.postgres.allowed_schema_versions.contains(&ver) {
-		return Err(InvariantViolation(format!("captaind schema version changed to {ver}")).into());
+		return Err(InvariantViolation(format!("captaind schema version {ver} not in allowed_schema_versions")).into());
 	}
 	chain.check_wallet().await?;
 	let tip = chain.tip().await?;
@@ -103,10 +93,8 @@ async fn tick(
 	// crash window between storing a tx and journaling it), and any journaled
 	// coin that is live again in captaind (DB restore) is re-marked spent
 	// before a user can refresh it. Scans the whole journal every tick.
-	let missing: Vec<(String, String, Vec<u8>)> = db::paid_ids(db).await?
-		.into_iter().filter(|(id, _, _)| !journal.contains(id)).collect();
-	for (id, txid, raw) in missing {
-		journal.record(&[id], &txid, &raw)?;
+	for (id, txid, raw) in db::paid_ids(db).await? {
+		if !journal.contains(&id) { journal.record(&[id], &txid, &raw)? }
 	}
 	for id in db::resurrected(db, &journal.ids()).await? {
 		let flipped = db::reassert_paid(db, &id).await?;
@@ -123,22 +111,17 @@ async fn tick(
 
 	settle_inflight(db, chain).await?;
 
-	// Fee gate (claims only). A claimed coin can no longer be refreshed by its
-	// owner, so never claim unless we can pay right now: a usable estimate
-	// within the cap. Without it, already-claimed coins still get paid.
+	// Fee gate: bitcoind's real estimate only, no fallback rate, ever. No
+	// estimate: no claims and no payouts this tick. There is no feerate cap:
+	// the per-coin percentage rule bounds what any coin can lose to fees.
 	let p = &cfg.policy;
-	// bitcoind's real estimate only; no fallback rate, ever.
-	let fee_rate = chain.estimate_fee_rate(p.payout_conf_target).await?;
-	// No estimate: no claims and no payouts this tick. There is no feerate
-	// cap: the per-coin percentage rule bounds what any coin can lose to fees,
-	// even if the estimate is absurd.
-	let Some(fee_rate) = fee_rate else {
+	let Some(fee_rate) = chain.estimate_fee_rate(p.payout_conf_target).await? else {
 		warn!("no fee estimate: not claiming or paying this tick");
 		return Ok(());
 	};
 
 	// Never pile up claims. Pay what is claimed before claiming more.
-	if db::count_in_state(db, "claimed").await? > 0 {
+	if !db::payouts_in_state(db, "claimed").await?.is_empty() {
 		return pay_claimed(cfg, db, chain, journal, fee_rate).await;
 	}
 	let mut claims_left = p.max_batch;
@@ -174,20 +157,17 @@ async fn process_coin(
 ) -> anyhow::Result<Outcome> {
 	let p = &cfg.policy;
 
-	let vtxo = match decode(&c.vtxo) {
+	// Amount, key and anchor come from the stored VTXO; the DB is trusted.
+	let vtxo: Vtxo = match Vtxo::deserialize(&c.vtxo) {
 		Ok(v) => v,
-		Err(reason) => return Ok(Outcome::Quarantine(reason)),
+		Err(e) => return Ok(Outcome::Quarantine(format!("undecodable vtxo: {e}"))),
 	};
 	let anchor = vtxo.chain_anchor();
-	if vtxo.expiry_height().to_u32().saturating_add(p.grace_blocks) > tip {
-		return Ok(Outcome::Wait("not expired + grace per the VTXO"));
-	}
 	let amount = vtxo.amount().to_sat();
 	// Not worth paying on-chain at today's fee: leave it alone (no ban, no
 	// claim), so its owner can still refresh it. Re-checked every tick.
-	if amount < p.min_payout_sat
-		|| !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
-		return Ok(Outcome::Wait("below min_payout_sat or fee share above max_fee_pct_per_payout"));
+	if !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
+		return Ok(Outcome::Wait("fee share above max_fee_pct_per_payout"));
 	}
 	// The funding output must be spent, on-chain, by a sweep to our
 	// scripts only, buried deep enough. The DB only tells us where to look.
@@ -232,8 +212,9 @@ async fn process_coin(
 	}
 	if db::in_round_participation(db, &c.vtxo_id).await? { return Ok(Outcome::Wait("in a round participation")) }
 
-	// The atomic claim.
-	let address = payout::address_for_pubkey(&vtxo.user_pubkey(), cfg.network).to_string();
+	// The atomic claim. The payout goes to BIP86 tr(coin key), key path only.
+	let key = vtxo.user_pubkey().x_only_public_key().0;
+	let address = Address::p2tr(&Secp256k1::verification_only(), key, None, cfg.network).to_string();
 	Ok(if db::claim(db, &c.vtxo_id, &anchor.to_string(), amount, &address, tip).await? {
 		Outcome::Claimed
 	} else {
@@ -267,21 +248,17 @@ async fn pay_claimed(
 		warn!("claimed payouts not affordable at {fee_rate:.2} sat/vB; waiting");
 		return Ok(());
 	}
-	let paying: std::collections::BTreeSet<&String> = per_address.keys().collect();
-	let ids: Vec<String> = claimed.iter().filter(|p| paying.contains(&p.address))
+	let ids: Vec<String> = claimed.iter().filter(|p| per_address.contains_key(&p.address))
 		.map(|p| p.vtxo_id.clone()).collect();
 	let mut expected = Vec::with_capacity(per_address.len());
 	for (addr, amt) in &per_address {
 		let spk = Address::from_str(addr)?.require_network(cfg.network)?.script_pubkey();
 		expected.push((spk, *amt));
 	}
-	let outputs: Vec<(String, u64)> = per_address.clone().into_iter().collect();
 
-	let built = chain.build_payout(outputs, fee_rate).await?;
+	let built = chain.build_payout(per_address.into_iter().collect(), fee_rate).await?;
 	// Refuse anything that is not exactly the intended payout.
-	let change = match checks::verify_payout(
-		&built.tx, &expected, built.fee_sat, pct,
-	) {
+	let change = match checks::verify_payout(&built.tx, &expected, built.fee_sat, pct) {
 		Ok(c) => c,
 		Err(e) => {
 			warn!("payout deferred: {e:#}");
@@ -301,31 +278,21 @@ async fn pay_claimed(
 	Ok(())
 }
 
-/// Rebroadcast stored txs (crash recovery) and mark confirmed ones.
-/// TODO: fee bump by RBF spending the same inputs.
+/// Broadcast stored txs (crash recovery) and mark confirmed ones.
 async fn settle_inflight(db: &mut tokio_postgres::Client, chain: &chain::Chain) -> anyhow::Result<()> {
-	let mut done = BTreeSet::new();
-	for p in db::payouts_in_state(db, "signed").await? {
-		if let (Some(t), Some(r)) = (p.txid, p.raw_tx) {
-			if done.insert(t.clone()) {
-				chain.broadcast(r).await?;
-				db::set_state_by_txid(db, &t, "signed", "broadcast").await?;
-			}
-		}
+	for (txid, raw) in db::txs_in_state(db, "signed").await? {
+		chain.broadcast(raw).await?;
+		db::set_state_by_txid(db, &txid, "signed", "broadcast").await?;
 	}
-	let sent: BTreeSet<String> = db::payouts_in_state(db, "broadcast").await?
-		.into_iter().filter_map(|p| p.txid).collect();
-	for txid in sent {
+	for (txid, raw) in db::txs_in_state(db, "broadcast").await? {
 		let confs = chain.confirmations(&txid).await.unwrap_or(0);
 		if confs >= 6 {
 			db::set_state_by_txid(db, &txid, "broadcast", "confirmed").await?;
 		} else if confs == 0 {
 			// Evicted from mempools or never relayed: rebroadcast the
 			// stored tx itself. Never build a new one for the same coins.
-			if let Some(raw) = db::raw_tx_by_txid(db, &txid).await? {
-				if let Err(e) = chain.broadcast(raw).await {
-					warn!(%txid, "rebroadcast failed: {e:#}");
-				}
+			if let Err(e) = chain.broadcast(raw).await {
+				warn!(%txid, "rebroadcast failed: {e:#}");
 			}
 		}
 	}

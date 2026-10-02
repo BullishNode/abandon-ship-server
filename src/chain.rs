@@ -7,7 +7,6 @@ use std::sync::Arc;
 use bitcoin::{Address, Amount, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 
-#[derive(Clone)]
 pub struct Chain {
 	rpc: Arc<Client>,
 }
