@@ -178,15 +178,22 @@ async fn tick(
 	// crash window between storing a tx and journaling it), and any journaled
 	// coin that is live again in captaind (DB restore) is re-marked spent
 	// before a user can refresh it. Scans the whole journal every tick.
-	let missing: Vec<(String, String)> = db::paid_ids(db).await?
-		.into_iter().filter(|(id, _)| !journal.contains(id)).collect();
-	for (id, txid) in missing {
-		journal.record(&[id], &txid)?;
+	let missing: Vec<(String, String, Vec<u8>)> = db::paid_ids(db).await?
+		.into_iter().filter(|(id, _, _)| !journal.contains(id)).collect();
+	for (id, txid, raw) in missing {
+		journal.record(&[id], &txid, &raw)?;
 	}
 	for id in db::resurrected(db, &journal.ids()).await? {
 		let flipped = db::reassert_paid(db, &id).await?;
 		warn!(vtxo = %id, flipped, "journaled coin live again in captaind (restore?); re-marked spent");
 		db::quarantine(db, &id, "already paid per local journal").await?;
+		// The restored DB may have lost the tx before it was broadcast: send
+		// the journaled one (a no-op if it is already known or mined).
+		if let Some(raw) = journal.raw_tx(&id) {
+			if let Err(e) = chain.broadcast(raw).await {
+				warn!(vtxo = %id, "journaled payout tx not accepted: {e:#}");
+			}
+		}
 	}
 
 	settle_inflight(db, chain).await?;
@@ -404,7 +411,7 @@ async fn pay_claimed(
 
 	let txid = built.tx.compute_txid().to_string();
 	db::mark_signed(db, &ids, &txid, &built.raw).await?; // persisted before broadcast
-	journal.record(&ids, &txid)?;                        // and on local disk
+	journal.record(&ids, &txid, &built.raw)?;            // and on local disk
 	chain.broadcast(built.raw).await?;
 	db::set_state_by_txid(db, &txid, "signed", "broadcast").await?;
 	info!(%txid, coins = ids.len(), fee = built.fee_sat, "payout broadcast");

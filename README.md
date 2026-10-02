@@ -10,7 +10,7 @@ Pays the value of expired, unrefreshed Ark coins on-chain to BIP86 `tr(coin_pubk
    - `estimatesmartfee` returns a rate. Without one, nothing is claimed or paid.
 2. **Journal reconciliation.**
    - every paid ledger row is in the journal;
-   - a journaled coin that is spendable again in captaind (DB restore) is set back to spent and quarantined.
+   - a journaled coin that is spendable again in captaind (DB restore) is set back to spent, quarantined, and its journaled payout tx is broadcast again (a no-op if already known).
 3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
 4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, not paid, not quarantined. If unpaid claims exist, pay those first and claim nothing new.
 5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.

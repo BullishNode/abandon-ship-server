@@ -62,5 +62,5 @@ The sidecar stops if the schema version changes under it.
 
 1. Stop captaind and the sidecar.
 2. Restore the DB.
-3. Start the sidecar first, with its journal. On its first tick it re-marks journaled coins that are spendable again as spent, and quarantines them.
+3. Start the sidecar first, with its journal. On its first tick it re-marks journaled coins that are spendable again as spent, quarantines them, and rebroadcasts their journaled payout tx.
 4. Start captaind.

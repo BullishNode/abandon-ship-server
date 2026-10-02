@@ -222,9 +222,10 @@ pub async fn count_in_state(db: &Client, state: &str) -> anyhow::Result<i64> {
 }
 
 /// Every coin id in the ledger with a txid (for journal reconciliation).
-pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String)>> {
-	db.query("SELECT vtxo_id, txid FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
-		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?))).collect()
+pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, Vec<u8>)>> {
+	db.query("SELECT vtxo_id, txid, raw_tx FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
+		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?,
+			r.try_get::<_, Option<Vec<u8>>>("raw_tx")?.unwrap_or_default()))).collect()
 }
 
 /// Journaled coins that are spendable/unclaimed again in captaind (DB restore).

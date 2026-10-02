@@ -222,7 +222,7 @@ assert_paid() { # assert_paid <id> <user_pubkey> <amount_sat>
 	got=$(paid_to "$txid" "$addr")
 	check "${id:0:8} output within fee share of $amt (got $got)" test "$got" -le "$amt" -a "$got" -ge $((amt * 80 / 100))
 	check "${id:0:8} spent in captaind" eq "$(spend_state "$id")" spent
-	check "${id:0:8} journaled once, with the ledger txid" eq "$(grep -c "^$id $txid\$" "$JOURNAL")" 1
+	check "${id:0:8} journaled once, with the ledger txid" eq "$(grep -cE "^$id $txid( |$)" "$JOURNAL")" 1
 	check "${id:0:8} journaled nowhere else" eq "$(journaled "$id")" 1
 }
 
