@@ -27,11 +27,21 @@ impl std::fmt::Display for InvariantViolation {
 }
 impl std::error::Error for InvariantViolation {}
 
-/// Decode a stored coin and validate it against the chain. An unclaimed hArk
-/// output (A1: a delegated refresh whose owner never came back) is stored
-/// without its unlock preimage; captaind keeps that in `round_participation`,
-/// so attach it first. Returns the validated coin and its anchor tx, or a
-/// reason to quarantine.
+/// Decode a stored coin and validate it against the chain.
+///
+/// Fully signed coins must pass `Vtxo::validate`. An unclaimed hArk output
+/// (A1: a delegated refresh whose owner never came back) is stored without
+/// its unlock preimage (captaind keeps it in `round_participation`) and its
+/// final leaf transition is unsigned until the owner returns. Such a coin is
+/// accepted only if (`unclaimed_ok`):
+/// - full validation fails at the **last** transition only, a hash-locked
+///   (v1) step, with "missing signature" or "missing preimage" (validation
+///   is sequential, so every earlier step passed, signatures included);
+/// - structure-only validation of the whole chain passes;
+/// - the output the last step spends (created by the signed parent) is
+///   exactly the hArk leaf script for the coin's key: so the payout key is
+///   committed by signed data and the unsigned step cannot redirect it;
+/// - the coin's amount does not exceed that signed output's value.
 async fn load_validated(
 	db: &tokio_postgres::Client, chain: &chain::Chain, blob: &[u8],
 ) -> anyhow::Result<Result<(Vtxo, bitcoin::Transaction), String>> {
@@ -51,10 +61,44 @@ async fn load_validated(
 		Ok((tx, _)) => tx,
 		Err(e) => return Err(e.context(format!("anchor tx {anchor} unavailable"))),
 	};
-	if let Err(e) = vtxo.validate(&anchor_tx) {
-		return Ok(Err(format!("vtxo failed validation: {e}")));
+	match vtxo.validate(&anchor_tx) {
+		Ok(()) => Ok(Ok((vtxo, anchor_tx))),
+		Err(e) => match unclaimed_ok(&vtxo, &anchor_tx, &e) {
+			Ok(()) => Ok(Ok((vtxo, anchor_tx))),
+			Err(why) => Ok(Err(format!("vtxo failed validation: {e} ({why})"))),
+		},
 	}
-	Ok(Ok((vtxo, anchor_tx)))
+}
+
+/// See `load_validated`: the one accepted partial-validation case.
+fn unclaimed_ok(
+	vtxo: &Vtxo, anchor_tx: &bitcoin::Transaction, err: &ark::vtxo::VtxoValidationError,
+) -> Result<(), &'static str> {
+	use ark::vtxo::VtxoValidationError as E;
+	match err {
+		E::GenesisTransition { error, genesis_idx, genesis_len, transition_kind }
+			if *genesis_idx + 1 == *genesis_len
+				&& *transition_kind == "hash-locked-cosigned-v1"
+				&& (*error == "missing signature" || *error == "missing preimage") => {},
+		_ => return Err("not an unsigned final hArk step"),
+	}
+	vtxo.validate_unsigned(anchor_tx).map_err(|_| "structure invalid")?;
+	let unlock_hash = vtxo.unlock_hash().ok_or("no unlock hash")?;
+
+	// The output the last tx spends, from the previous tx or the anchor.
+	let txs: Vec<_> = vtxo.transactions().map(|i| i.tx).collect();
+	let last = txs.last().ok_or("no genesis tx")?;
+	let prev_out = last.input.first().ok_or("last tx has no input")?.previous_output;
+	let prev_tx = if txs.len() >= 2 { &txs[txs.len() - 2] } else { anchor_tx };
+	if prev_tx.compute_txid() != prev_out.txid { return Err("last tx does not spend the previous step") }
+	let prev_txout = prev_tx.output.get(prev_out.vout as usize).ok_or("prev vout missing")?;
+
+	let leaf = ark::vtxo::policy::HarkLeafVtxoPolicy { user_pubkey: vtxo.user_pubkey(), unlock_hash };
+	let spend = leaf.taproot(vtxo.server_pubkey(), vtxo.expiry_height());
+	let expected = ScriptBuf::new_p2tr_tweaked(spend.output_key());
+	if prev_txout.script_pubkey != expected { return Err("coin key not committed by the signed parent") }
+	if vtxo.amount() > prev_txout.value { return Err("amount above the signed parent output") }
+	Ok(())
 }
 
 /// What happened to one candidate coin this tick.
@@ -188,12 +232,6 @@ async fn process_coin(
 	// T1: decode and validate the coin against the chain; trust nothing else.
 	let (vtxo, anchor_tx) = match load_validated(db, chain, &c.vtxo).await {
 		Ok(Ok(x)) => x,
-		// A1: an unclaimed hArk output's last step is only signed when its
-		// owner returns, so it cannot be fully verified. Manual review, never
-		// an unverified automatic payout. Upstream ask: a Bark validation of
-		// everything but that last, not-yet-signed step.
-		Ok(Err(reason)) if c.unclaimed => return Ok(Outcome::Quarantine(format!(
-			"unclaimed delegated-refresh output, not fully verifiable until claimed (manual review): {reason}"))),
 		Ok(Err(reason)) => return Ok(Outcome::Quarantine(reason)),
 		// A coin whose anchor cannot be fetched must not block other coins.
 		Err(e) => {

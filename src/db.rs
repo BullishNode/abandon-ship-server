@@ -14,7 +14,6 @@ pub struct Candidate {
 	pub vtxo: Vec<u8>,
 	/// DB amount: only used to skip uneconomic coins early, never to pay.
 	pub db_amount: u64,
-	pub unclaimed: bool,
 }
 
 pub struct Payout {
@@ -64,7 +63,7 @@ pub async fn migrate(db: &Client) -> anyhow::Result<()> {
 /// The `expiry` column is only a pre-filter; the validated VTXO decides.
 pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64) -> anyhow::Result<Vec<Candidate>> {
 	let rows = db.query("
-		SELECT v.vtxo_id, v.vtxo, v.amount, v.spend_state::text AS state
+		SELECT v.vtxo_id, v.vtxo, v.amount
 		FROM vtxo v
 		WHERE v.policy_type = 'pubkey'
 		  -- 'unclaimed' = a delegated refresh output whose owner never came back (A1)
@@ -81,7 +80,6 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64) -> anyhow
 			vtxo_id: r.try_get("vtxo_id")?,
 			vtxo: r.try_get("vtxo")?,
 			db_amount: r.try_get::<_, i64>("amount")?.max(0) as u64,
-			unclaimed: r.try_get::<_, &str>("state")? == "unclaimed",
 		}))
 		.collect()
 }

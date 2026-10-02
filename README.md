@@ -1,13 +1,11 @@
 # abandon-ship-server
 
-Sidecar for a Bull-run [captaind](https://gitlab.com/ark-bitcoin/bark) (Second's Ark server). When a user's Ark coin expires unrefreshed and the user stays away past a grace period, it pays the coin's value on-chain to the coin's own key, exactly once.
-
-Interim until Second ships fallback refresh. Requires no captaind code change. Design: *Ark expired-coin handling* (§3 sidecar, §5 safety).
+Sidecar process for [captaind](https://gitlab.com/ark-bitcoin/bark) (bark master `6768e0fb4`). It pays the value of an expired, unrefreshed Ark coin on-chain to BIP86 `tr(coin_pubkey)`, at most once, after a grace period. It needs no captaind code change: it reads captaind's Postgres, writes the coin's `spend_state` / `banned_until_height` with conditional updates, and keeps its own state in a `sidecar` schema and a local journal file.
 
 ## What it does, per tick
 
 1. **Settle:** rebroadcast stored payout txs and mark confirmed ones.
-2. **Select** candidates from captaind's DB: expired, past the grace period, spendable pubkey coins, not paid, not quarantined.
+2. **Select** candidates from captaind's DB: expired, past the grace period, `spendable` or `unclaimed` pubkey coins, not paid, not quarantined.
 3. **Validate the coin against the chain (T1).** Decode the stored VTXO and run `Vtxo::validate(&anchor_tx)`. Amount, key and expiry come from the validated VTXO, not from DB columns.
 4. **Check the sweep on-chain (T2):**
    - the round's funding output is spent;
@@ -39,7 +37,10 @@ Startup refuses to run if another instance holds the leader lock (T9), or if cap
 - **Pay-time re-derivation:** each claimed row's address and amount are re-derived from the chain-validated VTXO before paying. Any mismatch stops the process.
 - **Our ban must be intact:** the claim requires the exact ban the sidecar set. An operator unban restarts the wait (prevents H2).
 - **No piling up:** no new claims while unpaid claims exist; at most `max_batch` claims per tick.
-- **Unclaimed delegated-refresh outputs (A1)** go to manual review: they cannot be fully verified until their owner returns.
+- **Unclaimed delegated-refresh outputs (A1)** are paid too. Their final hArk step is unsigned until the owner returns, so they are accepted only if:
+  - validation fails at that last step alone;
+  - the whole chain is structurally valid;
+  - the spent output, created and signed by the parent, is exactly the hArk leaf script for the coin's key, so the key and the amount are committed by signed data.
 
 ## Why it cannot pay twice
 

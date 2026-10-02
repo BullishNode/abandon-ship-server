@@ -50,7 +50,7 @@ Stack: captaind/bark nightly-2026-10-01 (master 6768e0fb4), Bitcoin Core 31.0, `
   - no fallback rate of any kind (owner ruling); regtest gets a real estimator by seeding it with fee-paying txs (`regtest/seed-fees`).
 
   Verified: no estimate → "not claiming"; with a rate → the stranded coin was paid.
-- **O24.** **A1 confirmed, partly unfixable without upstream.** Delegated-refresh outputs whose owner never returns stay `unclaimed`; earlier the sidecar ignored them, so they were never paid. Now they are candidates:
+- **O24.** (Superseded by O27.) **A1 confirmed.** Delegated-refresh outputs whose owner never returns stay `unclaimed`; earlier the sidecar ignored them, so they were never paid. Now they are candidates:
   - the unlock preimage comes from `round_participation` (hex TEXT);
   - the tree part validates;
   - the final hash-locked leaf carries **no signature** until the owner returns ("missing signature").
@@ -58,3 +58,10 @@ Stack: captaind/bark nightly-2026-10-01 (master 6768e0fb4), Bitcoin Core 31.0, `
   So they cannot be fully verified, and they go to manual review with an explicit reason. An unverified automatic payout would reopen T1. **AC?** Upstream ask to Second: a validation that verifies everything except the unsigned final hArk step. Then A1 coins can be auto-paid.
 - **O25.** **A panic from external data:** `row.get` on `unlock_preimage` (TEXT, not BYTEA) crashed the process. Fixed: every DB read is `try_get`, and no `unwrap`/`expect` remains on external data.
 - **O26.** Owner ruling (2026-10-02): no feerate cap. The fee rule is a per-coin percentage (`max_fee_pct_per_payout`) plus a minimum amount (`min_payout_sat`). The percentage bounds what any coin loses to fees even with an absurd estimate.
+- **O27.** **A1 resolved without upstream.** In an unclaimed hArk output, the key and the amount are committed by the signed parent: the spent output's script is built from `MuSig(user, server)` + the unlock hash. Only the final leaf transition is unsigned. The rule:
+  - full validation fails only at the last v1 hash-locked step;
+  - `validate_unsigned` passes;
+  - the spent output's script equals `HarkLeafVtxoPolicy{coin key, unlock_hash}.taproot()`;
+  - the amount is at most that output's value.
+
+  Verified: the 8.4M-sat unclaimed coin was paid, and the payout is spendable with the owner's seed (coin-key descriptor). v0 hArk coins still go to quarantine (no public v0 policy type).
