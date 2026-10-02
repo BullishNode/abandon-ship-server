@@ -6,23 +6,23 @@ Each group starts from something seen on regtest (`docs/observations.md`) and va
 
 | # | Variation |
 | --- | --- |
-| A1 | Claim lands 0.5 s / 2 s / 4.5 s / 6 s after "Round started" (sweep the submit window); record which runs crash captaind |
+| A1 | Claim lands 0.5 s / 2 s / 4.5 s / 6 s after "Round started" (sweep the submit window); record which runs crash captaind — **pass** (suite: `h2-probe: ban at pre/0.5/2/4.5 s, no crash`) |
 | A2 | Same as A1 with 3 participants in the round; check whether the other two lose their round |
 | A3 | Same as A1 with a delegated (non-interactive) participation instead of an interactive one |
-| A4 | Operator unbans, then re-bans the coin with a **different** height during the wait (claim must not proceed) |
+| A4 | Operator unbans, then re-bans the coin with a **different** height during the wait (claim must not proceed) — **pass** (suite: `race-operator-unban`) |
 | A5 | Operator re-bans with the **same** height we wrote (indistinguishable: acceptable?) |
-| A6 | Ban lapses naturally (`ban_blocks` small) before the claim tick (claim must not proceed) |
+| A6 | Ban lapses naturally (`ban_blocks` small) before the claim tick (claim must not proceed) — **pass** (suite: `race-operator-unban`) |
 | A7 | Two claims for coins of the same round in one tick, while a captaind round spends one of them |
 | A8 | Claim racing an arkoor cosign of the same coin (unexpired coin with `allow_expired_arkoor=true`) |
 | A9 | Claim racing Lightning send phase 1 (needs an LN channel on the stack) |
 | A10 | Claim racing an offboard `finish` whose `prepare` started before the ban |
-| A11 | Held captaind spend tx (as #52), then rollback instead of commit: the claim must then win |
+| A11 | Held captaind spend tx (as #52), then rollback instead of commit: the claim must then win — **pass** (suite: `race-held-lock`) |
 | A12 | Held claim tx (sidecar paused via a debugger), captaind spends meanwhile: captaind must fail |
 | A13 | Restart captaind mid-wait: does the ban survive (DB) and the wait continue? |
 | A14 | Restart Postgres mid-claim transaction: rollback, retry next start |
 | A15 | User refreshes at exactly `expiry + G` (boundary tick) |
 | A16 | User's scheduled delegated refresh never executes (poison pill): the coin is blocked from payout forever. Add an age cut-off? — (note: a scheduled refresh executed fine for an offline user, u5 round 14) |
-| A17 | User submits a delegated refresh after the ban is placed (must be refused) |
+| A17 | User submits a delegated refresh after the ban is placed (must be refused) — **pass** (suite: `race-user-refresh`) |
 | A18 | Two sidecar instances against two DB replicas (leader lock is per DB: a split brain?) |
 | A19 | Sidecar and captaind clocks/heights disagree by one block during the claim |
 | A20 | Claim during a captaind upgrade migration (schema guard mid-flight) |
@@ -56,12 +56,12 @@ Each group starts from something seen on regtest (`docs/observations.md`) and va
 | C3 | `anchor_point` column edited (blob decides: check) |
 | C4 | `onchain_spent_txid` pointing at a real sweep of a different round |
 | C5 | Insert a new row duplicating an existing coin's blob under another id |
-| C6 | Edit `sidecar.payout.amount_sat` between claim and pay — **pass** (pay-time re-derivation) |
-| C7 | Edit `sidecar.payout.address` between claim and pay (must be re-derived or checked) — **pass** (pay-time re-derivation) |
+| C6 | Edit `sidecar.payout.amount_sat` between claim and pay — **pass** (suite: `tamper-payout`) |
+| C7 | Edit `sidecar.payout.address` between claim and pay (must be re-derived or checked) — **pass** (suite: `tamper-payout`) |
 | C8 | Insert a fake `sidecar.payout` row in state `claimed` for a coin that is still spendable — **pass** (journal → stop) |
 | C9 | Delete a `sidecar.ban` row mid-wait |
-| C10 | Delete `sidecar.payout` rows after the payout (#110): coin already spent, so no repay? Verify — **pass** (journal → stop) |
-| C11 | DB restored to before the claim (#109): the coin is spendable again and the payout is on-chain — **pass** (journal → re-marked spent + quarantine; user refresh refused) |
+| C10 | Delete `sidecar.payout` rows after the payout (#110): coin already spent, so no repay? Verify — **pass** (suite: `tamper-payout`) |
+| C11 | DB restored to before the claim (#109): the coin is spendable again and the payout is on-chain — **pass** (suite: `db-restore`) |
 | C12 | `vtxo_history` trigger disabled by an operator |
 | C13 | Signature-only forgery keeping the id (needs a crafted VTXO; may be infeasible) |
 | C14 | `refinery_schema_history` edited to fake the allowed version |
@@ -104,7 +104,7 @@ Each group starts from something seen on regtest (`docs/observations.md`) and va
 | E11 | Config reload without restart (not supported: document) |
 | E12 | Time to recover after a week-long sidecar outage (catch-up rate) |
 | E13 | Running the sidecar as the superuser vs the least-privilege role (all paths) |
-| E14 | rpcwhitelist enforced on the regtest RPC user (all calls the sidecar makes) |
+| E14 | rpcwhitelist enforced on the regtest RPC user (all calls the sidecar makes) — **pass** (suite: `all scenarios run as the whitelisted RPC user`) |
 | E15 | Upgrade captaind to a new nightly: does the gate catch semantic changes? |
 
 ## V-F. Client-visible behaviour (from O13, O19, #16): 10
