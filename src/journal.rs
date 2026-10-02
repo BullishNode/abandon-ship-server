@@ -1,7 +1,7 @@
 //! Append-only payout journal on the sidecar's own disk.
 //!
 //! The ledger lives in captaind's Postgres, which others can write and which
-//! can be restored from an older backup (#109, #110, variations C8/C10/C11).
+//! can be restored from an older backup.
 //! The journal is the payout record that survives both: a coin listed here is
 //! never paid again, whatever the DB says. One line per paid coin:
 //! `<vtxo_id> <txid>`, written and fsynced before the tx is broadcast.

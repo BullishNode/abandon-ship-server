@@ -30,7 +30,7 @@ impl std::error::Error for InvariantViolation {}
 /// Decode a stored coin and validate it against the chain.
 ///
 /// Fully signed coins must pass `Vtxo::validate`. An unclaimed hArk output
-/// (A1: a delegated refresh whose owner never came back) is stored without
+/// (a delegated refresh whose owner never came back) is stored without
 /// its unlock preimage (captaind keeps it in `round_participation`) and its
 /// final leaf transition is unsigned until the owner returns. Such a coin is
 /// accepted only if (`unclaimed_ok`):
@@ -70,7 +70,7 @@ async fn load_validated(
 	}
 }
 
-/// A validated coin must be a plain key coin of *our* server (B3).
+/// A validated coin must be a plain key coin of *our* server.
 fn foreign(vtxo: &Vtxo, cfg: &Config) -> Option<&'static str> {
 	if vtxo.server_pubkey() != cfg.server_pubkey { return Some("coin of another server") }
 	if !matches!(vtxo.policy(), ark::VtxoPolicy::Pubkey(_)) { return Some("not a plain pubkey coin") }
@@ -137,9 +137,9 @@ async fn main() -> anyhow::Result<()> {
 		.collect::<anyhow::Result<Vec<ScriptBuf>>>()?;
 
 	let mut db = db::connect(&cfg.postgres.conninfo).await?;
-	// T9: exactly one instance.
+	// Exactly one instance.
 	anyhow::ensure!(db::try_lead(&db).await?, "another sidecar instance holds the leader lock");
-	// T10: refuse unknown captaind schema versions.
+	// Refuse unknown captaind schema versions.
 	let ver = db::captaind_schema_version(&db).await?;
 	anyhow::ensure!(cfg.postgres.allowed_schema_versions.contains(&ver),
 		"captaind schema version {ver} not in allowed_schema_versions; run the upgrade gate first");
@@ -166,7 +166,7 @@ async fn tick(
 	cfg: &Config, sweep_spks: &[ScriptBuf], db: &mut tokio_postgres::Client, chain: &chain::Chain,
 	journal: &mut journal::Journal,
 ) -> anyhow::Result<()> {
-	// T10 every tick, not just at startup: captaind may be upgraded under us.
+	// Every tick, not just at startup: captaind may be upgraded under us.
 	let ver = db::captaind_schema_version(db).await?;
 	if !cfg.postgres.allowed_schema_versions.contains(&ver) {
 		return Err(InvariantViolation(format!("captaind schema version changed to {ver}")).into());
@@ -205,7 +205,7 @@ async fn tick(
 		return Ok(());
 	};
 
-	// A7: never pile up claims. Pay what is claimed before claiming more.
+	// Never pile up claims. Pay what is claimed before claiming more.
 	if db::count_in_state(db, "claimed").await? > 0 {
 		return pay_claimed(cfg, db, chain, journal, fee_rate).await;
 	}
@@ -249,7 +249,7 @@ async fn process_coin(
 		return Ok(Outcome::Wait("below min_payout_sat or fee share above max_fee_pct_per_payout"));
 	}
 
-	// T1: decode and validate the coin against the chain; trust nothing else.
+	// Decode and validate the coin against the chain; trust nothing else.
 	let (vtxo, anchor_tx) = match load_validated(db, chain, &c.vtxo).await {
 		Ok(Ok(x)) => x,
 		Ok(Err(reason)) => return Ok(Outcome::Quarantine(reason)),
@@ -280,7 +280,7 @@ async fn process_coin(
 		return Ok(Outcome::Quarantine("anchor vout missing".into()));
 	};
 
-	// T2: the funding output must be spent, on-chain, by a sweep to our
+	// The funding output must be spent, on-chain, by a sweep to our
 	// scripts only, buried deep enough. The DB only tells us where to look.
 	if chain.is_unspent(anchor).await? { return Ok(Outcome::Wait("anchor not swept yet")) }
 	let Some(spender) = db::recorded_spender(db, &anchor.to_string()).await? else {
@@ -314,7 +314,7 @@ async fn process_coin(
 	// Nothing in flight may hold the coin.
 	if db::in_round_participation(db, &c.vtxo_id).await? { return Ok(Outcome::Wait("in a round participation")) }
 
-	// T4: ban via captaind's own column, then wait (liveness only).
+	// Ban via captaind's own column, then wait (liveness only).
 	match db::ban_age_secs(db, &c.vtxo_id, tip).await? {
 		None => {
 			let until = tip.checked_add(p.ban_blocks).ok_or_else(|| anyhow::anyhow!("ban overflow"))?;
@@ -347,7 +347,7 @@ async fn pay_claimed(
 	if let Some(p) = claimed.iter().find(|p| journal.contains(&p.vtxo_id)) {
 		return Err(InvariantViolation(format!("claimed coin {} was already paid (journal)", p.vtxo_id)).into());
 	}
-	// T1 at pay time (variations C6/C7): the ledger row is in a DB others can
+	// At pay time: the ledger row is in a DB others can
 	// write. Re-derive amount and address from the chain-validated VTXO; any
 	// mismatch stops the sidecar instead of paying.
 	for p in &claimed {
@@ -388,7 +388,7 @@ async fn pay_claimed(
 	let outputs: Vec<(String, u64)> = per_address.clone().into_iter().collect();
 
 	let built = chain.build_payout(outputs, fee_rate).await?;
-	// T7/T8: refuse anything that is not exactly the intended payout.
+	// Refuse anything that is not exactly the intended payout.
 	let change = match checks::verify_payout(
 		&built.tx, &expected, built.fee_sat, pct,
 	) {
@@ -430,7 +430,7 @@ async fn settle_inflight(db: &mut tokio_postgres::Client, chain: &chain::Chain) 
 		if confs >= 6 {
 			db::set_state_by_txid(db, &txid, "broadcast", "confirmed").await?;
 		} else if confs == 0 {
-			// Evicted from mempools or never relayed (#10): rebroadcast the
+			// Evicted from mempools or never relayed: rebroadcast the
 			// stored tx itself. Never build a new one for the same coins.
 			if let Some(raw) = db::raw_tx_by_txid(db, &txid).await? {
 				if let Err(e) = chain.broadcast(raw).await {

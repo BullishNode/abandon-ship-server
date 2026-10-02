@@ -17,7 +17,7 @@ user = "sidecar"
 pass = "sidecar-regtest"
 
 [policy]
-# Bull's watchman sweep address(es) (watchmand `sweep_address`). A funding
+# The watchman sweep address(es) (watchmand `sweep_address`). A funding
 # output counts as swept only if its spender pays nothing else.
 sweep_addresses = ["bcrt1q..."]
 grace_blocks = 1008          # G after expiry before a payout (7 days)

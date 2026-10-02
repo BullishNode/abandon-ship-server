@@ -1,13 +1,7 @@
 # tests
 
-To do: one script per test in the server test plan:
+- `regtest/`: end-to-end scenarios against the stack in `../regtest/`. `run-all.sh` runs every scenario and prints PASS/FAIL.
+- `edge-cases.md`: catalogue of edge cases, with status.
+- `variations.md`: variations derived from regtest results, with status.
 
-| Group | Tests |
-| --- | --- |
-| Assumptions | A1–A6 |
-| Happy path | S1–S6 |
-| Race (×100 per spend path) | R1–R5 |
-| Exit and reorg | E1–E4 |
-| Crash and retry | C1–C4 |
-
-Run the invariant checks after every test.
+Unit tests: `cargo test`.

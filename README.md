@@ -1,77 +1,94 @@
 # abandon-ship-server
 
-Sidecar process for [captaind](https://gitlab.com/ark-bitcoin/bark) (bark master `6768e0fb4`). It pays the value of an expired, unrefreshed Ark coin on-chain to BIP86 `tr(coin_pubkey)`, at most once, after a grace period. It needs no captaind code change: it reads captaind's Postgres, writes the coin's `spend_state` / `banned_until_height` with conditional updates, and keeps its own state in a `sidecar` schema and a local journal file.
+Pays the value of expired, unrefreshed Ark coins on-chain to BIP86 `tr(coin_pubkey)`, at most once, for a [captaind](https://gitlab.com/ark-bitcoin/bark) server (bark master `6768e0fb4`). Runs next to captaind without modifying it: it reads captaind's Postgres, changes a coin's `spend_state` and `banned_until_height` only through conditional updates, and keeps its own state in a `sidecar` schema and a local journal file.
 
-## What it does, per tick
+## Flow (one tick)
 
-1. **Settle:** rebroadcast stored payout txs and mark confirmed ones.
-2. **Select** candidates from captaind's DB: expired, past the grace period, `spendable` or `unclaimed` pubkey coins, not paid, not quarantined.
-3. **Validate the coin against the chain (T1).** Decode the stored VTXO and run `Vtxo::validate(&anchor_tx)`. Amount, key and expiry come from the validated VTXO, not from DB columns.
-4. **Check the sweep on-chain (T2):**
-   - the round's funding output is spent;
-   - the spender pays only to the configured sweep addresses (ignoring OP_RETURN and P2A anchors), the same rule captaind's watchman uses;
-   - it has at least `sweep_min_confs` confirmations.
+1. **Checks.**
+   - captaind schema version is allowlisted;
+   - the payout wallet is loaded;
+   - `estimatesmartfee` returns a rate. Without one, nothing is claimed or paid.
+2. **Journal reconciliation.**
+   - every paid ledger row is in the journal;
+   - a journaled coin that is spendable again in captaind (DB restore) is set back to spent and quarantined.
+3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
+4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, not paid, not quarantined. If unpaid claims exist, pay those first and claim nothing new.
+5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
+   1. **Amount.** Skip if below `min_payout_sat`, or if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
+   2. **Chain validation.** Decode the stored VTXO and run `Vtxo::validate(&anchor_tx)`. Amount, key and expiry come from the validated VTXO, never from DB columns. It must be a `Pubkey`-policy coin of `server_pubkey`.
+   3. **Unclaimed outputs.** Coins whose last hArk step is unsigned (owner not back yet) are accepted only if:
+      - validation fails at that last step alone;
+      - `validate_unsigned` passes;
+      - the output it spends, which the signed parent creates, equals `HarkLeafVtxoPolicy{coin key, unlock_hash}.taproot()`.
+   4. **Sweep.** The anchor (round funding output) must be spent by a tx paying only the configured `sweep_addresses` (ignoring OP_RETURN and P2A), buried `sweep_min_confs`. A tree tx spending it means the round was partially unrolled: quarantine.
+   5. **In flight.** Skip while a round participation still references the coin.
+   6. **Ban, then wait.** Set `banned_until_height`, then wait `ban_wait_secs`. The claim needs that exact ban still in place: if an operator lifts it, the wait restarts.
+   7. **Claim.** In one transaction, serialised per round:
+      - `UPDATE vtxo SET spend_state='spent' WHERE … spend_state IN ('spendable','unclaimed') AND <our ban>`;
+      - check that the DB amount equals the validated amount;
+      - check that the round's payouts stay at or below the funding output;
+      - insert the payout row.
+6. **Pay.** For all claimed coins, in one batch:
+   - re-derive each row's address and amount from the chain-validated VTXO;
+   - one output per address, fee subtracted from the outputs, funded at the checked rate;
+   - verify the tx: exact outputs, at most one change output owned by the wallet, per-output fee share;
+   - store it in the DB, then append it to the journal (fsync), then broadcast.
+7. **Invariants.** Every paid coin is `spent` with no round, arkoor or offboard spend recorded, and no paid coin row is missing. A violation exits the process.
 
-   A non-sweep spender (partial unroll) quarantines the coin.
-5. **Check nothing is in flight:** skip the coin while a round participation references it.
-6. **Ban** by writing captaind's own `banned_until_height` column, as its admin `BanVtxo` does (T4; bounded to fit i32). Wait `ban_wait_secs`. This step is liveness only.
-7. **Claim atomically,** in one transaction, serialised per round:
-   - flip `spend_state` to spent iff still spendable;
-   - check the DB amount equals the validated amount;
-   - enforce I1: round payouts ≤ the funding output;
-   - insert the payout row.
-8. **Pay:**
-   - one batched tx to BIP86 `tr(coin_pubkey)`, with the fee taken from the outputs;
-   - **verified before storing (T7/T8):** exact outputs, at most one change output that must be ours, feerate and fee-share caps;
-   - stored before broadcast; claims are never reverted.
+## Why a coin cannot be paid twice
 
-Any per-coin problem quarantines that coin; the loop carries on (T3). The invariant check (I2) runs after every tick, and a violation stops the process.
+| Second redemption | Prevented by |
+| --- | --- |
+| Refresh, offboard, arkoor or Lightning in Ark | captaind commits every spend with a conditional `spend_state` update before releasing a signature, preimage or broadcast (`tree.rs`, `forfeit.rs`, `arkoor.rs`, `offboards.rs`); the claim uses the same condition |
+| Unilateral exit | payout only after the anchor is swept wholesale, `sweep_min_confs` deep |
+| Ledger edits, resets, DB restore | local journal, pay-time re-derivation, invariant check |
+| Retries, crashes | `payout.vtxo_id` is unique; tx stored before broadcast; rebroadcast reuses it |
 
-Startup refuses to run if another instance holds the leader lock (T9), if the `sidecar` tables are missing (the DB admin creates them), or if captaind's schema version is not allowlisted. The version is re-checked every tick (T10). More than `max_quarantine_per_tick` quarantines in one tick stop the process. Coins must be plain pubkey coins signed for `server_pubkey`. All bitcoind calls are untyped JSON-RPC.
+## Config
 
-## Additional guards (from testing; see `docs/observations.md`)
+See `config.example.toml`. The keys:
 
-- **Fee gate:** no claims and no payouts without bitcoind's real estimate (`estimatesmartfee`; no fallback rate, no feerate cap). The payout is funded at exactly that rate.
-- **Per-coin fee rule:** pay a coin only if it is at least `min_payout_sat`, its fee share is at most `max_fee_pct_per_payout` (default 20%) of its value, and at least 330 sat remain. Otherwise leave it alone, so its owner can still refresh it.
-- **Payout journal:** an append-only, fsynced file on the sidecar's own disk (`journal_path`). A journaled coin is never paid again. If one is live again in captaind (DB restore), it is re-marked spent and quarantined.
-- **Pay-time re-derivation:** each claimed row's address and amount are re-derived from the chain-validated VTXO before paying. Any mismatch stops the process.
-- **Our ban must be intact:** the claim requires the exact ban the sidecar set. An operator unban restarts the wait (prevents H2).
-- **No piling up:** no new claims while unpaid claims exist; at most `max_batch` claims per tick.
-- **Unclaimed delegated-refresh outputs (A1)** are paid too. Their final hArk step is unsigned until the owner returns, so they are accepted only if:
-  - validation fails at that last step alone;
-  - the whole chain is structurally valid;
-  - the spent output, created and signed by the parent, is exactly the hArk leaf script for the coin's key, so the key and the amount are committed by signed data.
+| Key | Meaning |
+| --- | --- |
+| `server_pubkey` | captaind's server key |
+| `journal_path` | local payout journal |
+| `postgres.conninfo` | captaind's database |
+| `postgres.allowed_schema_versions` | allowlisted captaind schema versions |
+| `bitcoind.url` | the payout wallet |
+| `sweep_addresses` | where the watchman sweeps |
+| `grace_blocks` | wait after expiry before paying |
+| `sweep_min_confs` | required sweep depth |
+| `ban_blocks` | length of the ban the sidecar sets |
+| `ban_wait_secs` | wait after banning, before claiming |
+| `max_batch` | coins per payout batch |
+| `payout_conf_target` | confirmation target for the fee estimate |
+| `max_fee_pct_per_payout` | maximum fee share per coin |
+| `min_payout_sat` | smallest coin paid on-chain |
+| `max_quarantine_per_tick` | circuit breaker |
 
-## Why it cannot pay twice
-
-- **Every captaind spend path** commits a conditional `spend_state='spendable'` update before releasing a signature, preimage or broadcast. The claim uses the same condition.
-- **Payouts happen only after a wholesale sweep** verified on-chain and buried at least 100 blocks deep, so no exit tx can then be valid.
-- **Destinations and amounts come from the chain-validated VTXO.**
-
-Verified against bark master `8c29e300c`. Re-verify on every captaind upgrade.
-
-Security: `docs/threat-model.md`. Least-privilege setup: `docs/deployment.md`.
+On mainnet, `sweep_min_confs ≥ 100` and `grace_blocks ≥ 144`.
 
 ## Run
 
 ```sh
-cp config.example.toml config.toml   # edit
 cargo run --release -- config.toml           # loop
-cargo run --release -- config.toml --once    # single tick
-RUST_LOG=info cargo run -- config.toml
+cargo run --release -- config.toml --once    # one tick
+RUST_LOG=abandon_ship_server=debug ...       # logs why each coin waits
 ```
 
-The sidecar creates its own `sidecar` schema in captaind's Postgres (`migrations/0001_sidecar.sql`). It needs a funded bitcoind wallet (`bitcoind.url` points at it) and no access to captaind's admin gRPC.
+Tables are created by the DB admin (`migrations/0001_sidecar.sql`). Setup and runbooks: `docs/deployment.md`. Design and threats: `docs/design.md`.
 
-## Status
+## Layout
 
-Scaffold, not tested against a live captaind yet. Open items:
-
-- [ ] regtest stack (`regtest/`) and the test suite from the server test plan (`tests/`)
-- [ ] RBF fee bump spending the same inputs
-- [ ] confirm on regtest:
-  - `onchain_spent_txid` is set for swept funding outputs;
-  - `Vtxo::validate` passes for spendable round and arkoor coins as stored by captaind;
-  - the refinery table name;
-  - the role grants
-- [ ] stale participations: decide when a non-forfeited participation stops blocking a payout
+| Path | Contents |
+| --- | --- |
+| `src/main.rs` | tick loop, per-coin decisions, payout |
+| `src/db.rs` | Postgres queries (reads captaind; conditional writes) |
+| `src/chain.rs` | bitcoind JSON-RPC (untyped) |
+| `src/checks.rs` | fee rule, sweep detection, payout verification (pure, unit-tested) |
+| `src/journal.rs` | append-only payout journal |
+| `src/payout.rs` | BIP86 payout address |
+| `examples/coin_key_descriptor.rs` | prints `tr(xprv/350'/0'/*)` from a Bark mnemonic, to spend payouts without Bark |
+| `regtest/` | docker stack and helper scripts |
+| `tests/regtest/` | end-to-end scenarios |
+| `tests/*.md` | edge-case catalogue |

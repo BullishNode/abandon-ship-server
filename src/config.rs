@@ -54,7 +54,7 @@ impl Config {
 		anyhow::ensure!(!cfg.postgres.allowed_schema_versions.is_empty(), "no allowed captaind schema versions");
 		anyhow::ensure!((1..=99).contains(&cfg.policy.max_fee_pct_per_payout), "max_fee_pct_per_payout must be 1..=99");
 		anyhow::ensure!(cfg.policy.min_payout_sat >= 330, "min_payout_sat must be >= 330 (dust)");
-		// Floors that only regtest/signet may go below (#90, #105, #106, #115).
+		// Floors that only regtest/signet may go below.
 		if cfg.network == bitcoin::Network::Bitcoin {
 			anyhow::ensure!(cfg.policy.sweep_min_confs >= 100, "sweep_min_confs must be >= 100 on mainnet");
 			anyhow::ensure!(cfg.policy.grace_blocks >= 144, "grace_blocks must be >= 144 on mainnet");

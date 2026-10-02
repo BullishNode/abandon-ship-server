@@ -71,7 +71,7 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64) -> anyhow
 		SELECT v.vtxo_id, v.vtxo, v.amount
 		FROM vtxo v
 		WHERE v.policy_type = 'pubkey'
-		  -- 'unclaimed' = a delegated refresh output whose owner never came back (A1)
+		  -- 'unclaimed' = a delegated refresh output whose owner never came back
 		  AND v.spend_state IN ('spendable', 'unclaimed')
 		  AND v.confirmed_height IS NULL
 		  AND v.expiry::bigint + $1::bigint <= $2::bigint
@@ -117,7 +117,7 @@ pub async fn in_round_participation(db: &Client, vtxo_id: &str) -> anyhow::Resul
 
 /// Seconds since the sidecar's ban on this coin started, or None if the coin
 /// is not under *our* ban: never banned, unbanned by an operator, re-banned
-/// with another height, or lapsed. Any of those restarts the wait (H2).
+/// with another height, or lapsed. Any of those restarts the wait.
 pub async fn ban_age_secs(db: &Client, vtxo_id: &str, tip: u32) -> anyhow::Result<Option<f64>> {
 	let row = db.query_opt("
 		SELECT EXTRACT(EPOCH FROM (NOW() - b.banned_at))::float8 AS age

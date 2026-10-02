@@ -89,7 +89,7 @@ impl Chain {
 	/// equally from all outputs. Does not broadcast.
 	pub async fn build_payout(&self, outputs: Vec<(String, u64)>, fee_rate_sat_vb: f64) -> anyhow::Result<BuiltPayout> {
 		self.run(move |c| {
-			// Untyped calls only: typed decoding broke on Core 31 (O10).
+			// Untyped calls only: typed decoding broke on Core 31.
 			let n = outputs.len();
 			let outs: serde_json::Map<String, serde_json::Value> = outputs.into_iter()
 				.map(|(a, s)| (a, serde_json::Value::from(Amount::from_sat(s).to_btc()))).collect();

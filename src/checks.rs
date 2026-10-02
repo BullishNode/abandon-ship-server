@@ -27,7 +27,7 @@ fn is_p2a(spk: &ScriptBuf) -> bool {
 	spk.as_bytes() == [0x51, 0x02, 0x4e, 0x73]
 }
 
-/// A funding output counts as swept by Bull only if its spender pays every
+/// A funding output counts as swept only if its spender pays every
 /// non-OP_RETURN, non-P2A output to a configured sweep script. This mirrors
 /// captaind's own "Claim" classification (`server/src/watchman/mod.rs`).
 pub fn is_sweep(spender: &Transaction, sweep_spks: &[ScriptBuf]) -> bool {
