@@ -196,10 +196,10 @@ pub async fn resurrected(db: &Client, ids: &[String]) -> anyhow::Result<Vec<Stri
 	).await?.into_iter().map(|r| Ok(r.try_get("vtxo_id")?)).collect()
 }
 
-pub async fn payouts_in_state(db: &Client, state: &str) -> anyhow::Result<Vec<Payout>> {
+pub async fn claimed_payouts(db: &Client) -> anyhow::Result<Vec<Payout>> {
 	let rows = db.query(
-		"SELECT vtxo_id, amount_sat, address FROM sidecar.payout WHERE state = $1 ORDER BY claimed_at",
-		&[&state],
+		"SELECT vtxo_id, amount_sat, address FROM sidecar.payout WHERE state = 'claimed' ORDER BY claimed_at",
+		&[],
 	).await?;
 	rows.into_iter().map(|r| Ok(Payout {
 		vtxo_id: r.try_get("vtxo_id")?,

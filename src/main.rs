@@ -129,7 +129,7 @@ async fn tick(
 	// Never pile up claims: claimed coins payable at this rate take up the
 	// batch. Ones that fees made unaffordable wait without blocking others.
 	let share = checks::fee_share_bound(fee_rate);
-	let payable = db::payouts_in_state(db, "claimed").await?.iter()
+	let payable = db::claimed_payouts(db).await?.iter()
 		.filter(|c| checks::affordable(c.amount_sat, share, p.max_fee_pct_per_payout)).count() as i64;
 	let mut claims_left = p.max_batch - payable;
 	let mut quarantined: u64 = 0;
@@ -241,7 +241,7 @@ async fn pay_claimed(
 	cfg: &Config, db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal,
 	fee_rate: f64,
 ) -> anyhow::Result<()> {
-	let claimed = db::payouts_in_state(db, "claimed").await?;
+	let claimed = db::claimed_payouts(db).await?;
 	if claimed.is_empty() { return Ok(()) }
 	// A claimed row for a coin already in the journal means the ledger was
 	// reset or restored: never pay twice.
