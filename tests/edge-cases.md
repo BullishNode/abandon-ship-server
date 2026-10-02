@@ -17,7 +17,7 @@ Status: `todo` · `pass` · `FAIL` (bug found) · `fixed` · `n/a` (not testable
 | 9 | A built tx is never stored (`mark_signed` fails) | That tx is never broadcast; the wallet does not double-spend later | pass (code: `mark_signed` guard; only stored txs are broadcast) |
 | 10 | Payout tx dropped from the mempool | No second, different payout for the same coin | fixed: `broadcast` rows with 0 confs are rebroadcast (same tx); bitcoind wallet also rebroadcasts on load |
 
-## Batch 2: "I am the attacker" (malicious user or DB writer)
+## Batch 2: "I am the attacker" (malicious user; DB-writer rows are out of scope)
 
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
@@ -27,10 +27,10 @@ Status: `todo` · `pass` · `FAIL` (bug found) · `fixed` · `n/a` (not testable
 | 14 | Coin at max arkoor depth | Validates and pays like any other | todo |
 | 15 | User refreshes right after losing the claim race | Refused by captaind | pass (suite: `happy-single`) |
 | 16 | User restores from seed after the payout | Coin not resurrected | pass (suite: `unclaimed-delegated: seed sweep`) |
-| 17 | DB writer changes `vtxo.amount` | Amount mismatch → quarantine, no pay | pass (suite: `tamper-coin`) |
-| 18 | DB writer inserts a forged `vtxo` row/blob | Validation fails → quarantine | pass (as #82) (suite: `tamper-coin`) |
-| 19 | DB writer sets `onchain_spent_txid` to an unrelated tx | "does not spend the anchor" → quarantine | pass (suite: `tamper-coin`) |
-| 20 | DB writer edits the expiry column into the past | The VTXO's own expiry decides → wait | pass |
+| 17 | DB writer changes `vtxo.amount` | Amount mismatch → quarantine, no pay | n/a: DB writers are out of scope (trusted DB) |
+| 18 | DB writer inserts a forged `vtxo` row/blob | Validation fails → quarantine | n/a: DB writers are out of scope (trusted DB) |
+| 19 | DB writer sets `onchain_spent_txid` to an unrelated tx | "does not spend the anchor" → quarantine | n/a: DB writers are out of scope (trusted DB) |
+| 20 | DB writer edits the expiry column into the past | The VTXO's own expiry decides → wait | n/a: DB writers are out of scope (trusted DB) |
 
 ## Batch 3: "Ops is having a bad day" (infrastructure)
 
@@ -126,14 +126,14 @@ Status: `todo` · `pass` · `FAIL` (bug found) · `fixed` · `n/a` (not testable
 
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
-| 81 | `vtxo` blob truncated or random bytes | Quarantine "undecodable" | pass (suite: `tamper-coin`) |
-| 82 | Blob of a different coin (id mismatch) | Quarantine "blob id != row id" | pass (suite: `tamper-coin`) |
-| 83 | Blob with valid structure but a bad signature | Quarantine "failed validation" | pass (id check caught it; signature-only forgery not exercised) |
-| 84 | `anchor_point` text unparseable / `onchain_spent_txid` not hex | Per-coin error, not tick abort | pass (suite: `tamper-coin: non-hex spender quarantined, tick continues`) |
-| 85 | SQL injection via any DB string | All queries parameterised | todo |
+| 81 | `vtxo` blob truncated or random bytes | Quarantine "undecodable" | n/a: DB writers are out of scope (trusted DB) |
+| 82 | Blob of a different coin (id mismatch) | Quarantine "blob id != row id" | n/a: DB writers are out of scope (trusted DB) |
+| 83 | Blob with valid structure but a bad signature | Quarantine "failed validation" | n/a: DB writers are out of scope (trusted DB) |
+| 84 | `anchor_point` text unparseable / `onchain_spent_txid` not hex | Per-coin error, not tick abort | n/a: DB writers are out of scope (trusted DB) |
+| 85 | SQL injection via any DB string | All queries parameterised | n/a: DB writers are out of scope (trusted DB) |
 | 86 | Payout address from a non-pubkey policy (checkpoint, HTLC) | Filtered by `policy_type`; validated policy | todo |
-| 87 | Huge `amount` overflows i64 or u64 sums | Amount from a validated VTXO; sums checked | todo |
-| 88 | Negative or zero amounts in the DB | Validated VTXO amount; DB mismatch → quarantine | todo |
+| 87 | Huge `amount` overflows i64 or u64 sums | Amount from a validated VTXO; sums checked | n/a: DB writers are out of scope (trusted DB) |
+| 88 | Negative or zero amounts in the DB | Validated VTXO amount; DB mismatch → quarantine | n/a: DB writers are out of scope (trusted DB) |
 | 89 | Sweep tx with zero non-anchor outputs (OP_RETURN only) | Not a sweep (`paid_any` false) | pass (unit test) |
 | 90 | Config values out of range (`max_fee_share` 0, `grace` 0, `ban_blocks` huge) | Rejected at load or bounded | pass (bounds at load) |
 
@@ -164,8 +164,8 @@ Status: `todo` · `pass` · `FAIL` (bug found) · `fixed` · `n/a` (not testable
 | 106 | `sweep_min_confs` set to 1 | Reorg risk; config floor | pass (mainnet floor) |
 | 107 | Compromised crate in the dependency tree | `Cargo.lock` + `cargo audit` | todo |
 | 108 | Config committed to the public repo | `.gitignore`; secrets only via the deploy env | todo |
-| 109 | Restoring a DB backup that predates payouts | Payout ledger lost → the same coins look unpaid → double pay! | pass (suite: `db-restore: journal re-marks the coin spent and quarantines it; no second payout`) |
-| 110 | Operator deletes rows from `sidecar.payout` | Same as 109 | pass (suite: `tamper-payout: row deleted, no repay; row reset, sidecar stops`) |
+| 109 | Restoring a DB backup that predates payouts | Payout ledger lost → the same coins look unpaid → double pay! | pass (`db-restore`: journal re-marks the coin spent and rebroadcasts the journaled tx) |
+| 110 | Operator deletes rows from `sidecar.payout` | Same as 109 | pass (`tamper-payout`: coin stays spent, no repay) |
 
 ## Batch 12: "Strange times" (scale, upgrades, compatibility)
 

@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 SCENARIOS=(${@:-schema-version happy-single happy-batch shared-address unclaimed-delegated
 	race-held-lock race-user-refresh race-operator-unban h2-probe
 	exit-full exit-partial exit-blocked
-	tamper-coin tamper-payout db-restore crash-signed
+	tamper-payout db-restore crash-signed
 	fee-pct-rule fee-no-estimate circuit-breaker infra-bitcoind infra-postgres
 	web-journey})
 

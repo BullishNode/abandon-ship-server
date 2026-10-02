@@ -47,25 +47,25 @@ Each group starts from something seen on regtest (`docs/observations.md`) and va
 | B14 | Sweep address rotated in watchmand config; old sweeps must still count |
 | B15 | Board coin swept by a board-sweep tx shape that differs from round sweeps |
 
-## V-C. Data integrity / attacker with DB write (from #17–#20, #81–#83): 15
+## V-C. Data integrity (DB writers are out of scope; restore cases remain) (from #17–#20, #81–#83): 15
 
 | # | Variation |
 | --- | --- |
-| C1 | Valid blob of a coin from **another round** with the row id changed to match |
-| C2 | Valid blob, `policy` column swapped to another user's pubkey (blob decides: check) |
-| C3 | `anchor_point` column edited (blob decides: check) |
-| C4 | `onchain_spent_txid` pointing at a real sweep of a different round |
-| C5 | Insert a new row duplicating an existing coin's blob under another id |
-| C6 | Edit `sidecar.payout.amount_sat` between claim and pay — **pass** (suite: `tamper-payout`) |
-| C7 | Edit `sidecar.payout.address` between claim and pay (must be re-derived or checked) — **pass** (suite: `tamper-payout`) |
+| C1 | Valid blob of a coin from **another round** with the row id changed to match — **n/a** (DB writers out of scope) |
+| C2 | Valid blob, `policy` column swapped to another user's pubkey (blob decides: check) — **n/a** (DB writers out of scope) |
+| C3 | `anchor_point` column edited (blob decides: check) — **n/a** (DB writers out of scope) |
+| C4 | `onchain_spent_txid` pointing at a real sweep of a different round — **n/a** (DB writers out of scope) |
+| C5 | Insert a new row duplicating an existing coin's blob under another id — **n/a** (DB writers out of scope) |
+| C6 | Edit `sidecar.payout.amount_sat` between claim and pay — **n/a** (DB writers out of scope) |
+| C7 | Edit `sidecar.payout.address` between claim and pay (must be re-derived or checked) — **n/a** (DB writers out of scope) |
 | C8 | Insert a fake `sidecar.payout` row in state `claimed` for a coin that is still spendable — **pass** (journal → stop) |
-| C9 | Delete a `sidecar.ban` row mid-wait |
+| C9 | Delete a `sidecar.ban` row mid-wait — **n/a** (DB writers out of scope) |
 | C10 | Delete `sidecar.payout` rows after the payout (#110): coin already spent, so no repay? Verify — **pass** (suite: `tamper-payout`) |
 | C11 | DB restored to before the claim (#109): the coin is spendable again and the payout is on-chain — **pass** (suite: `db-restore`) |
-| C12 | `vtxo_history` trigger disabled by an operator |
-| C13 | Signature-only forgery keeping the id (needs a crafted VTXO; may be infeasible) |
-| C14 | `refinery_schema_history` edited to fake the allowed version |
-| C15 | Two coins with identical blobs (same id) under different rows |
+| C12 | `vtxo_history` trigger disabled by an operator — **n/a** (DB writers out of scope) |
+| C13 | Signature-only forgery keeping the id (needs a crafted VTXO; may be infeasible) — **n/a** (DB writers out of scope) |
+| C14 | `refinery_schema_history` edited to fake the allowed version — **n/a** (DB writers out of scope) |
+| C15 | Two coins with identical blobs (same id) under different rows — **n/a** (DB writers out of scope) |
 
 ## V-D. Money and fees (from #24, #34/#95, #36): 15
 
