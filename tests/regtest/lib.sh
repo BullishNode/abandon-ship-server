@@ -212,16 +212,16 @@ v=[v for v in json.load(sys.stdin) if v['id'] == '$2'][0]; print(v['user_pubkey'
 }
 
 # Assert one coin was paid exactly once, to tr(its key), for its amount minus
-# at most its fee share (20%).
-assert_paid() { # assert_paid <id> <user_pubkey> <amount_sat>
-	local id=$1 pk=$2 amt=$3 txid addr got
+# at most its fee share (max_fee_pct_per_payout, default 20%).
+assert_paid() { # assert_paid <id> <user_pubkey> <amount_sat> [max_fee_pct]
+	local id=$1 pk=$2 amt=$3 pct=${4:-20} txid addr got
 	txid=$(payout_txid "$id")
 	check "${id:0:8} has a payout tx" test -n "$txid"
 	[ -n "$txid" ] || return 0
 	addr=$(tr_address "$pk")
 	check "${id:0:8} payout address = tr(user key)" eq "$(q "SELECT address FROM sidecar.payout WHERE vtxo_id='$id'")" "$addr"
 	got=$(paid_to "$txid" "$addr")
-	check "${id:0:8} output within fee share of $amt (got $got)" test "$got" -le "$amt" -a "$got" -ge $((amt * 80 / 100))
+	check "${id:0:8} output within fee share of $amt (got $got)" test "$got" -le "$amt" -a "$got" -ge $((amt * (100 - pct) / 100))
 	check "${id:0:8} spent in captaind" eq "$(spend_state "$id")" spent
 	check "${id:0:8} journaled once, with the ledger txid" eq "$(grep -cE "^$id $txid( |$)" "$JOURNAL")" 1
 	check "${id:0:8} journaled nowhere else" eq "$(journaled "$id")" 1

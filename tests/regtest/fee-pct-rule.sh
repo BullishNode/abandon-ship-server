@@ -1,5 +1,5 @@
 #!/bin/bash
-# O26/#13: a 3000-sat coin whose fee share (230 vB x estimate) is above
+# #13: a 3000-sat coin whose fee share (230 vB x estimate) is above
 # max_fee_pct_per_payout (20%) is left alone: no ban, no claim, no
 # quarantine, still refreshable. With the rule relaxed to 60% it is paid.
 . "$(dirname "$0")/lib.sh"
@@ -18,6 +18,6 @@ check "20%: still spendable" eq "$(spend_state "$X")" spendable
 
 mkcfg max_fee_pct_per_payout=60
 check "60%: paid" pay_until "$X" 3
-assert_paid "$X" "$PK" "$AMT"
+assert_paid "$X" "$PK" "$AMT" 60
 confirm_payouts
 finish
