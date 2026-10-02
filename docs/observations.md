@@ -65,3 +65,4 @@ Stack: captaind/bark nightly-2026-10-01 (master 6768e0fb4), Bitcoin Core 31.0, `
   - the amount is at most that output's value.
 
   Verified: the 8.4M-sat unclaimed coin was paid, and the payout is spendable with the owner's seed (coin-key descriptor). v0 hArk coins still go to quarantine (no public v0 policy type).
+- **O28.** (Suite, `shared-address.sh`.) **Payouts failed whenever the fee estimate times 1e5 was not exact in binary.** `estimatesmartfee` 3.003e-5 BTC/kvB became `fee_rate` 3.0029999999999997 sat/vB, and `walletcreatefundedpsbt` refuses more than 3 decimals ("Invalid amount"). The claimed coins stayed unpaid until the estimate changed. Fixed: convert through integer sat/kvB.

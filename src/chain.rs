@@ -42,8 +42,10 @@ impl Chain {
 	pub async fn estimate_fee_rate(&self, conf_target: u16) -> anyhow::Result<Option<f64>> {
 		self.run(move |c| {
 			let v: serde_json::Value = c.call("estimatesmartfee", &[conf_target.into()])?;
-			// feerate is BTC/kvB; 1 BTC/kvB = 100_000 sat/vB
-			Ok(v.get("feerate").and_then(|f| f.as_f64()).map(|btc_kvb| btc_kvb * 100_000.0))
+			// feerate is BTC/kvB; 1 BTC/kvB = 100_000 sat/vB. Go through integer
+			// sat/kvB: `walletcreatefundedpsbt` rejects a fee_rate with more than
+			// 3 decimals ("Invalid amount"), e.g. 3.003e-5 * 1e5 = 3.0029999999999997.
+			Ok(v.get("feerate").and_then(|f| f.as_f64()).map(|btc_kvb| (btc_kvb * 1e8).round() / 1000.0))
 		}).await
 	}
 
