@@ -5,12 +5,7 @@ name: abandon-regtest
 services:
   bitcoind:
     image: bitcoin/bitcoin@sha256:a1d05be6939b5c85132a761d2b795f5b8a2612ce53782263da4939778e461792  # Core 31.0
-    command: [bitcoind, -regtest, -server, -printtoconsole, -rpcbind=0.0.0.0, -rpcallowip=0.0.0.0/0, -rpcuser=second, -rpcpassword=ark,
-      # least-privilege sidecar user (docs/deployment.md); password sidecar-regtest
-      "-rpcauth=sidecar:abandonregtestsalt0001$$fab883b19a2762091b80f822ef7aa47145d904d95e9b2077aca860d4053be676",
-      -rpcwhitelistdefault=0,
-      "-rpcwhitelist=sidecar:getwalletinfo,getblockcount,estimatesmartfee,getrawtransaction,gettxout,getaddressinfo,walletcreatefundedpsbt,walletprocesspsbt,finalizepsbt,sendrawtransaction",
-      -txindex, -blockfilterindex, -coinstatsindex]
+    command: [bitcoind, -regtest, -server, -printtoconsole, -rpcbind=0.0.0.0, -rpcallowip=0.0.0.0/0, -rpcuser=second, -rpcpassword=ark, -txindex, -blockfilterindex, -coinstatsindex]
     volumes: ["bitcoin:/home/bitcoin/.bitcoin"]
     ports: ["127.0.0.1:48443:18443"]
     healthcheck:

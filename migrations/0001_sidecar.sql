@@ -1,7 +1,6 @@
 -- Sidecar state, in captaind's Postgres under its own schema, so a claim
 -- (the vtxo UPDATE) and its ledger row commit in one transaction.
--- The `sidecar` schema is pre-created by the DB admin (docs/deployment.md);
--- CREATE SCHEMA IF NOT EXISTS would need CREATE on the whole database.
+-- The `sidecar` schema is created first (docs/deployment.md).
 
 -- Coins banned by the sidecar while waiting for in-flight operations to clear.
 CREATE TABLE IF NOT EXISTS sidecar.ban (
@@ -10,8 +9,8 @@ CREATE TABLE IF NOT EXISTS sidecar.ban (
 	banned_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Coins the sidecar will not touch automatically (bad data, partial unroll,
--- failed validation). Cleared only by a human.
+-- Coins the sidecar will not touch automatically (undecodable, partial
+-- unroll, already paid per the journal). Cleared only by a human.
 CREATE TABLE IF NOT EXISTS sidecar.quarantine (
 	vtxo_id    TEXT PRIMARY KEY,
 	reason     TEXT NOT NULL,
@@ -22,8 +21,8 @@ CREATE TABLE IF NOT EXISTS sidecar.quarantine (
 -- claimed -> signed -> broadcast -> confirmed.
 CREATE TABLE IF NOT EXISTS sidecar.payout (
 	vtxo_id       TEXT PRIMARY KEY,
-	anchor_point  TEXT NOT NULL,      -- round funding outpoint (for invariant I1)
-	amount_sat    BIGINT NOT NULL,    -- from the chain-validated VTXO
+	anchor_point  TEXT NOT NULL,      -- round funding outpoint
+	amount_sat    BIGINT NOT NULL,    -- from the stored VTXO
 	address       TEXT NOT NULL,      -- BIP86 tr(coin_pubkey)
 	state         TEXT NOT NULL CHECK (state IN ('claimed','signed','broadcast','confirmed')),
 	txid          TEXT,
@@ -32,4 +31,3 @@ CREATE TABLE IF NOT EXISTS sidecar.payout (
 	updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS payout_state_ix ON sidecar.payout (state);
-CREATE INDEX IF NOT EXISTS payout_anchor_ix ON sidecar.payout (anchor_point);

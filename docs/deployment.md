@@ -2,22 +2,11 @@
 
 ## Postgres (captaind's database)
 
-Run as the database owner. The admin owns the `sidecar` schema and tables. The `sidecar` role can read what it needs, update three `vtxo` columns, and write its own tables without `DELETE`.
+Postgres listens on localhost or a private network; only captaind and the sidecar connect. The sidecar uses captaind's DB role, or any role owning captaind's schema. Create its schema and tables once:
 
 ```sql
-CREATE ROLE sidecar LOGIN PASSWORD '<secret>';
-
 CREATE SCHEMA sidecar;
 \i migrations/0001_sidecar.sql
-GRANT USAGE ON SCHEMA sidecar TO sidecar;
-GRANT SELECT, INSERT, UPDATE ON sidecar.ban, sidecar.quarantine, sidecar.payout TO sidecar;
-
-GRANT SELECT ON vtxo, round_part_input, refinery_schema_history TO sidecar;
--- unlock_preimage is needed to validate unclaimed hArk outputs; it cannot spend anything alone
-GRANT SELECT (id, unlock_hash, unlock_preimage, round_id, forfeited_at) ON round_participation TO sidecar;
-GRANT UPDATE (spend_state, banned_until_height, updated_at) ON vtxo TO sidecar;
--- captaind's vtxo update trigger writes vtxo_history with the caller's rights
-GRANT INSERT ON vtxo_history TO sidecar;
 ```
 
 At startup the sidecar:
@@ -28,17 +17,11 @@ The connection has no TLS. Run the sidecar on the Postgres host, or reach Postgr
 
 ## bitcoind (payout wallet)
 
-- **Wallets.** `payout` must be the only wallet on this node: `rpcwhitelist` restricts methods, not wallets. captaind and watchmand use their own internal wallets.
+- **Wallets.** `payout` must be the only wallet on this node. captaind and watchmand use their own internal wallets.
 - **Wallet loading.** Create it with `load_on_startup=true`. The sidecar checks it every tick.
 - **Indexes.** `txindex=1`.
 - **Float.** Keep it small; top it up from the watchman sweep address.
-- **RPC user:**
-
-```ini
-rpcauth=sidecar:<salt$hash>
-rpcwhitelistdefault=0
-rpcwhitelist=sidecar:getwalletinfo,getblockcount,estimatesmartfee,getrawtransaction,gettxout,getaddressinfo,walletcreatefundedpsbt,walletprocesspsbt,finalizepsbt,sendrawtransaction
-```
+- **RPC.** The node's normal RPC credentials.
 
 ## Process
 

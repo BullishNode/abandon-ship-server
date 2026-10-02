@@ -56,12 +56,13 @@ finish() {
 # --- sidecar ------------------------------------------------------------------
 
 # mkcfg [key=value ...]: write $CFG from regtest/sidecar.toml, with the
-# whitelisted RPC user, an absolute journal path, a short ban wait (scenarios
+# node's RPC user and captaind's DB role, an absolute journal path, a short ban wait (scenarios
 # that race the round use ban_wait_secs=45, i.e. above round_interval 30s +
 # submit 5s + sign 5s), and any overrides.
 CFG=$LOG/sidecar.toml
 mkcfg() {
-	sed -e 's/^user = .*/user = "sidecar"/' -e 's/^pass = .*/pass = "sidecar-regtest"/' \
+	sed -e 's/^user = .*/user = "second"/' -e 's/^pass = .*/pass = "ark"/' \
+		-e 's#^conninfo = .*#conninfo = "host=127.0.0.1 port=45432 user=postgres password=abandon-regtest dbname=bark-server-db"#' \
 		-e "s#^journal_path = .*#journal_path = \"$JOURNAL\"#" \
 		-e 's/^ban_wait_secs = .*/ban_wait_secs = 3/' "$R/sidecar.toml" > "$CFG"
 	local kv

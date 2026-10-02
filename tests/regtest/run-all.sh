@@ -14,12 +14,6 @@ SCENARIOS=(${@:-schema-version happy-single happy-batch shared-address unclaimed
 (cd "$ROOT" && cargo build -q) || { echo "build failed"; exit 2; }
 for s in bitcoind postgres captaind watchmand; do healthy "$s" 60 || { echo "stack: $s not up"; exit 2; }; done
 
-# T6: the whitelisted RPC user can do what the sidecar needs, nothing else.
-RPC() { curl -s -o /dev/null -w '%{http_code}' -u sidecar:sidecar-regtest \
-	-d "{\"method\":\"$1\",\"params\":[]}" "http://127.0.0.1:48443/wallet/payout"; }
-[ "$(RPC getwalletinfo)" = 200 ] && [ "$(RPC dumpwallet)" = 403 ] && [ "$(RPC listwallets)" = 403 ] \
-	|| { echo "rpcwhitelist: sidecar user not set up as in docs/deployment.md"; exit 2; }
-
 # Drain what earlier runs left: no claimed or signed rows may block the suite.
 mkcfg; ensure_fees
 for i in 1 2 3; do tick; sleep 4; done

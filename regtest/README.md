@@ -10,7 +10,7 @@ Docker stack for testing: `bitcoind` (Core 31, no `-fallbackfee`), `postgres`, `
 4. Render `watchmand.toml` from `watchmand.toml.tmpl`, using a `sweep` wallet address (bech32m).
 5. `docker compose up -d cln captaind watchmand`.
 6. Fund the captaind rounds wallet (`./captaind rpc wallet`) and the watchman wallet (its descriptor is in `wallet_changeset`).
-7. Create the `sidecar` role and tables as in `docs/deployment.md`.
+7. Create the `sidecar` schema and tables as in `docs/deployment.md`.
 8. Write `sidecar.toml` from `config.example.toml`.
 9. Run `./seed-fees` so that `estimatesmartfee` has data.
 
