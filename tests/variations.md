@@ -96,11 +96,11 @@ Variations of the regtest scenarios. Status: `todo` unless noted. DB writers, ma
 | # | Variation |
 | --- | --- |
 | G1 | 10k expired coins: candidate query time with and without an index on `(policy_type, spend_state, expiry)` |
-| G2 | 10k quarantined dust coins: do they leave the candidate window? (NOT EXISTS cost) |
+| G2 | 10k quarantined dust coins: do they leave the candidate window? (NOT EXISTS cost) — yes: quarantined, small and unaffordable coins are filtered before the limit (`fee-window`) |
 | G3 | Anchor fetch per coin: 1000 coins in one round means 1000 identical RPCs (cache) |
 | G4 | Decode time for depth-100 arkoor chains |
 | G5 | Tick duration with `max_batch` 500 |
-| G6 | Payout tx size at 500 outputs (standardness) |
+| G6 | Payout tx size at 500 outputs (standardness) — pass (arithmetic): 500 P2TR outputs are about 21.5 kvB, under 100 kvB |
 | G7 | `sidecar.ban` table growth over a year |
 | G8 | `vtxo_history` growth from the sidecar's updates (2 per coin) |
 | G9 | Concurrency with captaind's DB load (lock contention on `vtxo`) |

@@ -93,21 +93,21 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
 | 61 | Millions of dust coins expire at once; the candidate query scans them every tick | Bounded by `LIMIT max_batch` with an index; no OOM | fixed (small coins filtered before the limit) |
-| 62 | Dust coins fill every candidate slot forever (quarantine-or-wait loop starves real coins) | Quarantined dust leaves the window; real coins still progress | fixed (as #61); gap: coins unaffordable at the current fee rate still occupy the window |
+| 62 | Dust coins fill every candidate slot forever (quarantine-or-wait loop starves real coins) | Quarantined dust leaves the window; real coins still progress | fixed (as #61 and #137) |
 | 63 | One huge VTXO blob (max exit depth) per candidate | Decode memory bounded per coin | todo |
 | 64 | Thousands of coins waiting on the same unavailable anchor tx: one RPC per coin per tick | RPC storm bounded by `max_batch`; consider a per-anchor cache | todo |
 | 65 | `sidecar.ban` / `quarantine` grow without bound | Small rows; add retention for `ban` | todo |
 | 66 | bitcoind RPC slow (seconds per call): tick takes minutes | Ticks never overlap (sequential loop) | todo |
 | 67 | Postgres connection pool exhausted by captaind | Sidecar uses one connection; errors retried | todo |
 | 68 | Payout batch near the 100 kvB standardness limit | `max_batch` × output size stays under the limit | todo |
-| 69 | Mempool full: payout rejected (min relay fee rises) | Broadcast error retried; no rebuild | todo |
+| 69 | Mempool full: payout rejected (min relay fee rises) | Broadcast error retried; no rebuild | gap (as 149) |
 | 70 | Log flooding: a warn per coin per tick for stuck coins | Bounded by `max_batch`; acceptable | todo |
 
 ## Batch 8: "Kill it" (crashes, restarts, process lifecycle)
 
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
-| 71 | SIGKILL between ban and claim | Restart: ban age continues; claims later | todo |
+| 71 | SIGKILL between ban and claim | Restart: ban age continues; claims later | pass (as 140, 139) |
 | 72 | SIGKILL inside the claim transaction | Postgres rolls back; nothing half-done | todo |
 | 73 | SIGKILL between `mark_signed` and broadcast | Restart rebroadcasts the stored tx | pass (`crash-signed`) |
 | 74 | OOM-kill during payout building | Same as 72/73 by stage | todo |
@@ -161,7 +161,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | 111 | captaind upgrade changes the VTXO encoding | Decode fails → quarantine; schema guard first | todo |
 | 112 | captaind adds a new spend path that is not conditional | Upgrade-gate audit | todo |
 | 113 | captaind adds a fallback refresh: re-issue and payout both happen | Must disable the sidecar or teach it re-issued coins | todo |
-| 114 | Very long downtime of the sidecar (months) | Catches up in batches | todo |
+| 114 | Very long downtime of the sidecar (months) | Catches up in batches | pass: catches up oldest first, `max_batch` per tick; a lapsed ban is re-set (`ban-lapse`, `fee-window`) |
 | 115 | Block height near i32 max for bans | Bounded | pass (`ban_blocks` ≤ 10000) |
 | 116 | Taproot address format changes / new network | Network-typed addresses | todo |
 | 117 | User wallet from another Ark client (not Bark) with a different key derivation | Paid to the coin's key regardless | todo |
@@ -206,7 +206,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | J13 | Server unreachable when the client checks its expired coins | Auto-refresh does not submit a paid-out coin; refused coins are skipped | todo |
 | J14 | User starts an emergency exit of an expired coin from bark-web after the round was swept | Exit cannot succeed; no on-chain fees burnt; the coin is still paid by the sidecar | todo |
 | J15 | User comes back during the ban wait (coin banned, not yet claimed) | Refresh refused; coin stays *Renewing* until the server marks it spent | todo |
-| J16 | barkd restarts between adopting the spent state and finding the payout | Spent state survives; the payout is found after the restart | todo |
+| J16 | barkd restarts between adopting the spent state and finding the payout | Spent state survives; the payout is found after the restart | pass (`web-journey`) |
 | J17 | Two devices on one seed sweep the same payout at the same time | One sweep confirms; the other device's history does not show money leaving twice | todo |
 | J18 | User receives a new payment to the same Ark address after an older coin there was paid out on-chain | New coin is a normal Ark coin; the old payout stays sweepable | todo |
 
@@ -222,7 +222,7 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 | 124 | Owner offboards the coin during the ban wait | Refused ("banned until block"); paid once | pass (`attack-ban-wait`) |
 | 125 | Owner offboards an expired, swept coin before the ban | The offboard wins; the coin is never paid (`offboarded_in`, not spendable) | todo |
 | 126 | One owner's partial exit unrolls a round in which many other coins were abandoned | Those coins are quarantined; payouts of other rounds go on | fixed: one unrolled round counts as one quarantine (`exit-breaker`) |
-| 127 | Owner opens `max_batch` × 20 coins that wait forever at the front of the candidate window (unaffordable at today's fee) | Newer coins still progress | gap (as #62) |
+| 127 | Owner opens `max_batch` × 20 coins that wait forever at the front of the candidate window (unaffordable at today's fee) | Newer coins still progress | fixed (as 137) |
 | 128 | Owner sends coins to a victim's Ark address (same key) | Victim's payout output carries the sum; nobody loses | pass (`shared-address`) |
 | 129 | Owner splits value into coins each too small for the fee rule but affordable together on one key | Not claimed (the rule is per coin at claim time); they stay refreshable | pass (code) |
 | 130 | Owner refreshes one of two coins that share a key; the other is paid | Only the paid coin is listed with the payout; the sweep movement counts it once | gap: the bark fork lists the payout under every expired spent coin of the key; the sweep movement subtracts the refreshed coin too |
@@ -232,3 +232,27 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 | 134 | Client calls sweep-expiry-payouts from two barkds on one seed at once | One sweep confirms; the other is rejected or replaced; one movement per barkd | todo |
 | 135 | Owner exits a coin after the sidecar banned it, before the claim | Exit txs spend an already-swept funding output: invalid; coin paid once | n/a (as X13) |
 | 136 | Owner with many claimed coins at a rising fee holds `max_batch` claimed rows | Unaffordable rows do not count against `max_batch` (as 121) | fixed (as 121) |
+
+## Batch 16: "Time and scale" (months offline, many coins, restarts, slow nodes)
+
+| # | Case | Expected | Status |
+| --- | --- | --- | --- |
+| 137 | More than `max_batch` × 20 coins unaffordable at today's fee expire before a payable coin (arkoor sends split change into many small coins) | The payable coin is still claimed | fixed: unaffordable coins are filtered before the candidate limit (`fee-window`) |
+| 138 | A coin after 21 arkoor sends from one wallet expires | Paid like any other | pass (`fee-window`) |
+| 139 | The sidecar bans a coin, then is down longer than `ban_blocks` | Ban lapses; on return it re-bans and waits the full ban wait; paid once | pass (`ban-lapse`) |
+| 140 | The sidecar restarts between every step (ban, wait, claim, build, broadcast, confirm) | Paid once | pass (every scenario runs one process per tick, `--once`) |
+| 141 | Thousands of coins paid over months: each batch tx was journaled once per coin and every tick read every ledger row's raw tx | Journal and per-tick reads grow linearly with payouts, not with payouts × batch size | fixed: raw tx journaled once per tx; reconciliation reads ids and txids only (`happy-batch`, `crash-signed`, `db-restore`) |
+| 142 | Every ledger row stores the whole batch tx (`raw_tx` per coin) | DB size grows by `max_batch` copies per batch | gap: storage only; no read path loads them per row |
+| 143 | The reconciliation scans every ledger row and every journaled id each tick | Small rows; linear in all-time payouts | gap: no retention; fine for millions of rows, not unbounded |
+| 144 | captaind's chain view lags bitcoind by ~100 blocks when the sidecar bans | The ban (bitcoind tip + `ban_blocks`) lasts longer in captaind's view; no unsafe effect | n/a: the lag is seen in regtest; the ban height comes from bitcoind's tip, at or above captaind's |
+| 145 | The sidecar's bitcoind lags captaind's chain by more than `ban_blocks` | The ban is already past in captaind's view, so the wait does not block refreshes; the claim still needs a spendable coin | n/a: liveness only (as #2); one operator runs both nodes |
+| 146 | barkd restarts after adopting the spent state, before the sweep | Spent state and payout survive the restart | pass (`web-journey`) |
+| 147 | barkd image rebuilt from the current fork mid-programme (client upgraded while a payout is outstanding) | The journey still works on the new build | pass (`web-journey` on the rebuilt image) |
+| 148 | Payout wallet fragmented after months of small top-ups: funding picks many inputs, so each output's fee share exceeds the bound | Batch deferred; while it lasts the claimed rows count against `max_batch` | gap: operator consolidates the wallet; `payout deferred` is logged every tick |
+| 149 | Full mempool: mempool min fee above bitcoind's estimate; a stored `signed` tx is rejected | No rebuild; stored tx retried | gap: `settle_inflight` aborts the whole tick while the stored tx is rejected (no claims, no confirmations) and resumes when the mempool clears; going on instead would let the wallet reuse that tx's inputs and strand its coins |
+| 150 | Many rounds expire in one block: one `gettxout` + `getrawtransaction` per coin, not per anchor | Tick time bounded by the candidate window | n/a: bounded by `max_batch` × 20 payable coins |
+| 151 | captaind is upgraded while payouts are claimed but not broadcast | Schema check stops ticks; claimed coins stay spent; nothing rebuilt; resumes on the new allowlist | pass (code: the schema check runs before settle and claim) |
+| 152 | A user refreshed through many rounds before going offline | Only the last coin is a candidate; older ones are `spent` in a round | pass (`spend_state` filter) |
+| 153 | The sidecar is first deployed on a captaind that has run for years | Every historic expired, unrefreshed coin ≥ the fee threshold is paid, oldest first, in batches | n/a: the candidate query has no age limit; oldest expiry first |
+| 154 | Blocks arrive faster than the ban wait (ban lapses before `ban_wait_secs` ends) | Re-banned each tick, never claimed while the burst lasts | n/a: mainnet `ban_blocks` spans hours, the wait spans minutes |
+| 155 | Failed rounds leave participations unforfeited for months | Coins in them would wait forever | pass (data): the 16 unforfeited participations in the regtest DB hold only coins that were refreshed |

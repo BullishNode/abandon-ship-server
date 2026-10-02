@@ -14,7 +14,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
    - every paid ledger row is in the journal;
    - a journaled coin that is spendable again in captaind (DB restore) is set back to spent, quarantined, and its journaled payout tx is broadcast again (a no-op if already known).
 3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
-4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat`, not paid, not quarantined. Claimed coins still payable at the current rate count against `max_batch`; ones that fees made unaffordable wait without blocking new claims.
+4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat` and affordable at the current rate (both filtered before the candidate limit), not paid, not quarantined. Claimed coins still payable at the current rate count against `max_batch`; ones that fees made unaffordable wait without blocking new claims.
 5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
    1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
    2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
@@ -25,7 +25,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 6. **Pay.** For all claimed coins, in one batch:
    - one output per address, fee subtracted from the outputs, funded at the checked rate;
    - verify the tx: exact outputs, at most one change output owned by the wallet, per-output fee share;
-   - store it in the DB, then append it to the journal (fsync), then broadcast.
+   - store it in the DB, then append it to the journal (one line per coin, the raw tx once per tx; fsync), then broadcast.
 7. **Invariants.** Every paid coin is `spent` with no round, arkoor or offboard spend recorded, and no paid coin row is missing. A violation exits the process.
 
 ## Why a coin cannot be paid twice
