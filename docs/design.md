@@ -1,27 +1,34 @@
 # Design
 
-## Threats and guards
+## Scope
 
-| Attacker / failure | Attempt | Guard |
-| --- | --- | --- |
-| DB writer (captaind DB compromise, SQL access, bug) | Insert or edit a coin row to get paid | Chain validation of the VTXO blob, its policy and its server key; amounts and keys never taken from columns; per-round cap (payouts ≤ funding output) |
-| DB writer | Forge the unsigned last step of an unclaimed output | The paid key must match the hArk leaf script in the signed parent output |
-| DB writer | Edit, reset or delete ledger rows; restore an old DB | Pay-time re-derivation from the VTXO; local journal; invariant check; DB role has no `DELETE` on its tables |
-| DB writer | Point the spender hint at an unrelated tx | The spender must spend the anchor on-chain, and pay only the sweep scripts |
-| User | Redeem in Ark **and** get paid | Conditional claim racing captaind's conditional spends: exactly one wins |
-| User | Exit **and** get paid | Payout only after a wholesale sweep `sweep_min_confs` deep; leaf-confirmed coins are never candidates |
-| User | Refresh during the claim (in-flight round) | Ban, then wait longer than a round; claim requires our ban intact. A claim landing inside a round's submit window would make captaind's round persist fail and exit the process (seen on regtest when the ban is bypassed) |
-| Sidecar host compromise | Drain the payout wallet; misuse RPC | Small float; `rpcwhitelist`; destinations derived from chain data |
-| Fee estimator broken or absent | Overpay fees, or strand claimed coins | No estimate: no claims, no payouts. Per-coin percentage cap. No fallback rate |
-| Upgrade | captaind schema or encoding changes | Schema version allowlisted, checked every tick; circuit breaker on mass quarantine |
-| Crash or restart anywhere | Double pay, lost payout | Tx stored before broadcast; journal appended before broadcast; rebroadcast reuses the stored tx; rows only move forward |
-| Second instance | Duplicate batches | Postgres advisory lock |
+- **Trusted:** captaind, its Postgres DB, bitcoind, the sidecar and its host. One operator runs all of them; only captaind and the sidecar write captaind's DB.
+- **Out of scope:** DB writers, compromised hosts, a malicious operator, deep reorgs.
+- **Goal:** every outstanding entitlement remains represented in durable, recoverable state until settlement. No entitlement is settled twice. Eligible entitlements are eventually settled when the required chain, fee, funding and service conditions hold.
+
+## Failures and guards
+
+| # | Failure | Guard | Scenarios (`tests/regtest/`) |
+| --- | --- | --- | --- |
+| 1 | The same coin is refreshed, exited **and** paid | Conditional claim racing captaind's conditional spends (exactly one wins). Ban, then wait longer than a round; the claim requires our ban intact. No claim while the coin is in a round participation. Payout only after a wholesale sweep `sweep_min_confs` deep; leaf-confirmed coins are never candidates | `race-user-refresh`, `race-held-lock`, `race-operator-unban`, `h2-probe`, `exit-full`, `exit-blocked`, `unclaimed-delegated` |
+| 2 | Paying the wrong branch of a partially exited round | A funding output spent by a tree tx quarantines the round's remaining coins (planned: pay when a confirmed sweep spends an outpoint on the coin's own exit path) | `exit-partial` |
+| 3 | A crash or a DB restore loses an outstanding payment | Tx stored in the DB, then appended with its raw tx to the local journal (fsync), then broadcast; stored txs are rebroadcast, never rebuilt. A journaled coin spendable again after a restore is re-marked spent and its journaled tx rebroadcast. Ledger rows only move forward | `crash-signed`, `db-restore`, `tamper-payout` |
+| 4 | Fees or selection block eligible payouts indefinitely | No estimate: no claims, no payouts (no fallback rate). Per-coin rule: pay only if the fee share is ≤ `max_fee_pct_per_payout` and the coin ≥ `min_payout_sat`; smaller coins are filtered before the candidate limit. A coin that cannot be processed waits or is quarantined alone; a burst of quarantines stops the process | `fee-pct-rule`, `fee-no-estimate`, `circuit-breaker`, `happy-batch` |
+| 5 | A restored wallet cannot find or spend its payouts | Payout to BIP86 `tr(coin key)`, derivable from the seed; the bark fork adopts the spent state, finds the payout and sweeps it | `web-journey`, `unclaimed-delegated` |
+
+Process: one instance (Postgres advisory lock); the captaind schema version is allowlisted and checked every tick; the payout tx is verified (outputs, amounts, fee share, change ours) before it is stored.
 
 ## Limitations
 
-- **Partially unrolled rounds:** if a round's funding output is spent by a tree tx (some user exited partway), its remaining coins are quarantined, not paid. They can still be redeemed through captaind if the owner returns.
+- **Quarantine** (a coin is never touched again automatically; manual review):
+  - `undecodable vtxo` / `vtxo failed validation`: released only by a fixed sidecar build (new encoding); then the row is deleted from `sidecar.quarantine` by the operator and the coin is a candidate again.
+  - `coin of another server` / `not a plain pubkey coin`: permanent; not the sidecar's to pay.
+  - `round partially unrolled`: permanent; the owner can still redeem the coin through captaind.
+  - `already paid per local journal`: permanent; the coin was paid, the DB was restored.
+- **Waiting on fees** keeps the coin with the operator: no estimate or a fee share above the cap leaves it unpaid, refreshable by its owner, until fees fall.
+- **Confirmation floor:** with `grace_blocks` ≥ 144 above `sweep_min_confs` ≥ 100 (mainnet floors), a sweep made at expiry is already deep enough when the grace period ends; `sweep_min_confs` only matters for late sweeps.
+- **Reorgs:** a payout is not re-checked after 6 confirmations; a deeper reorg that drops it goes unnoticed.
 - **v0 hArk outputs:** unclaimed outputs with a v0 hash-locked leaf are quarantined (no public v0 leaf policy type in `ark-lib`).
-- **Small coins:** coins below `min_payout_sat`, or whose fee share exceeds `max_fee_pct_per_payout`, are not paid on-chain. They stay refreshable by their owner.
 - **No RBF bump:** a payout stuck at a low fee is rebroadcast but not bumped.
 - **Client side:** captaind does not tell wallets that a coin was paid out. A wallet must ask (`GetVtxoStatus`), find the payout at `tr(coin key)`, and sweep it. Until it does, the coin still appears in its balance and refreshes of it are refused.
 - **Dependence on captaind's DB:** column names, `spend_state` values and the stored VTXO encoding are captaind internals. The schema allowlist plus an upgrade check (audit every `UPDATE vtxo`, rerun `tests/regtest/`) are required before each captaind upgrade.

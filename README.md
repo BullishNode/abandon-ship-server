@@ -2,6 +2,8 @@
 
 Pays the value of expired, unrefreshed Ark coins on-chain to BIP86 `tr(coin_pubkey)`, at most once, for a [captaind](https://gitlab.com/ark-bitcoin/bark) server (bark master `6768e0fb4`). Runs next to captaind without modifying it: it reads captaind's Postgres, changes a coin's `spend_state` and `banned_until_height` only through conditional updates, and keeps its own state in a `sidecar` schema and a local journal file.
 
+Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and trusted by one operator; the sidecar defends against users refreshing, exiting and being paid for the same coin, crashes and DB restores, and fees or selection stalling payouts.
+
 ## Flow (one tick)
 
 1. **Checks.**
@@ -41,7 +43,7 @@ Pays the value of expired, unrefreshed Ark coins on-chain to BIP86 `tr(coin_pubk
 | --- | --- |
 | Refresh, offboard, arkoor or Lightning in Ark | captaind commits every spend with a conditional `spend_state` update before releasing a signature, preimage or broadcast (`tree.rs`, `forfeit.rs`, `arkoor.rs`, `offboards.rs`); the claim uses the same condition |
 | Unilateral exit | payout only after the anchor is swept wholesale, `sweep_min_confs` deep |
-| Ledger edits, resets, DB restore | local journal, pay-time re-derivation, invariant check |
+| DB restore | local journal (with the raw tx), invariant check |
 | Retries, crashes | `payout.vtxo_id` is unique; tx stored before broadcast; rebroadcast reuses it |
 
 ## Config
@@ -76,7 +78,7 @@ cargo run --release -- config.toml --once    # one tick
 RUST_LOG=abandon_ship_server=debug ...       # logs why each coin waits
 ```
 
-Tables are created by the DB admin (`migrations/0001_sidecar.sql`). Setup and runbooks: `docs/deployment.md`. Design and threats: `docs/design.md`.
+Tables are created by the DB admin (`migrations/0001_sidecar.sql`). Setup and runbooks: `docs/deployment.md`. Scope, failures and guards: `docs/design.md`.
 
 ## Layout
 
