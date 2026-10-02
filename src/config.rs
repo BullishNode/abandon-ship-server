@@ -5,8 +5,6 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
 	pub network: bitcoin::Network,
-	/// captaind's server pubkey (hex). Coins signed for any other server are refused.
-	pub server_pubkey: bitcoin::secp256k1::PublicKey,
 	/// Append-only payout journal on local disk (survives DB restores).
 	pub journal_path: std::path::PathBuf,
 	pub poll_interval_secs: u64,

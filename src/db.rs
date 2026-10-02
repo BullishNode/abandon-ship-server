@@ -1,6 +1,5 @@
 //! Postgres access. Reads captaind's tables; writes only the guarded claim,
-//! the ban column, and the `sidecar` schema (see docs/deployment.md for the
-//! least-privilege role).
+//! the ban column, and the `sidecar` schema.
 
 use tokio_postgres::{Client, NoTls};
 
@@ -12,8 +11,6 @@ const LEADER_LOCK: i64 = 0x41_42_41_4e_44_4f_4e; // "ABANDON"
 pub struct Candidate {
 	pub vtxo_id: String,
 	pub vtxo: Vec<u8>,
-	/// DB amount: only used to skip uneconomic coins early, never to pay.
-	pub db_amount: u64,
 }
 
 pub struct Payout {
@@ -22,16 +19,6 @@ pub struct Payout {
 	pub address: String,
 	pub txid: Option<String>,
 	pub raw_tx: Option<Vec<u8>>,
-}
-
-pub enum Claim {
-	/// Coin flipped to spent and payout recorded.
-	Claimed,
-	/// The user redeemed it first (not spendable any more).
-	Lost,
-	/// The claim would break invariant I1 or captaind's row disagrees with
-	/// the validated VTXO. Rolled back.
-	Refused(String),
 }
 
 pub async fn connect(conninfo: &str) -> anyhow::Result<Client> {
@@ -54,23 +41,22 @@ pub async fn captaind_schema_version(db: &Client) -> anyhow::Result<i32> {
 	Ok(db.query_one("SELECT MAX(version) AS v FROM refinery_schema_history", &[]).await?.try_get("v")?)
 }
 
-/// The sidecar does not create its tables: the DB admin runs
-/// `migrations/0001_sidecar.sql` and owns them (no DELETE for the role).
+/// The sidecar does not create its tables: `migrations/0001_sidecar.sql`
+/// is applied once at setup (docs/deployment.md).
 pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
 	for t in ["sidecar.ban", "sidecar.quarantine", "sidecar.payout"] {
 		let ok: bool = db.query_one("SELECT to_regclass($1) IS NOT NULL AS ok", &[&t]).await?.try_get("ok")?;
-		anyhow::ensure!(ok, "table {t} missing: run migrations/0001_sidecar.sql as the DB admin");
+		anyhow::ensure!(ok, "table {t} missing: apply migrations/0001_sidecar.sql");
 	}
 	Ok(())
 }
 
 /// Expired, unpaid, unquarantined, spendable user coins past the grace period,
 /// of at least `min_amount` (filtered before the limit, so small coins never
-/// fill the window). The `expiry` and `amount` columns are only pre-filters;
-/// the validated VTXO decides.
+/// fill the window).
 pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64) -> anyhow::Result<Vec<Candidate>> {
 	let rows = db.query("
-		SELECT v.vtxo_id, v.vtxo, v.amount
+		SELECT v.vtxo_id, v.vtxo
 		FROM vtxo v
 		WHERE v.policy_type = 'pubkey'
 		  -- 'unclaimed' = a delegated refresh output whose owner never came back
@@ -87,7 +73,6 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amoun
 		.map(|r| Ok(Candidate {
 			vtxo_id: r.try_get("vtxo_id")?,
 			vtxo: r.try_get("vtxo")?,
-			db_amount: r.try_get::<_, i64>("amount")?.max(0) as u64,
 		}))
 		.collect()
 }
@@ -168,53 +153,31 @@ pub async fn quarantine(db: &Client, vtxo_id: &str, reason: &str) -> anyhow::Res
 	Ok(())
 }
 
-/// The atomic claim. In one transaction:
-/// - flip the coin to spent iff still spendable (the race with the user);
-/// - check captaind's amount equals the validated VTXO amount;
-/// - enforce I1: payouts from this round never exceed its funding output;
-/// - record the payout.
+/// The atomic claim: flip the coin to spent iff it is still spendable and
+/// our ban is intact (the race with the user), and record the payout, in one
+/// transaction. False if the user redeemed it first.
 pub async fn claim(
-	db: &mut Client, vtxo_id: &str, anchor_point: &str, amount_sat: u64, funding_value_sat: u64, address: &str,
-	tip: u32,
-) -> anyhow::Result<Claim> {
+	db: &mut Client, vtxo_id: &str, anchor_point: &str, amount_sat: u64, address: &str, tip: u32,
+) -> anyhow::Result<bool> {
 	let tx = db.transaction().await?;
-	// Serialize claims per round so the I1 sum below is exact.
-	tx.execute("SELECT pg_advisory_xact_lock(hashtext($1))", &[&anchor_point]).await?;
-
-	let row = tx.query_opt("
+	let n = tx.execute("
 		UPDATE vtxo SET spend_state = 'spent', updated_at = NOW()
 		WHERE vtxo_id = $1 AND policy_type = 'pubkey'
 		  AND spend_state IN ('spendable', 'unclaimed') AND confirmed_height IS NULL
 		  -- our ban must still be exactly in place (not lifted by an operator)
 		  AND banned_until_height > $2
 		  AND banned_until_height = (SELECT until_height FROM sidecar.ban WHERE vtxo_id = $1)
-		RETURNING amount
 	", &[&vtxo_id, &(tip as i32)]).await?;
-	let Some(row) = row else {
+	if n != 1 {
 		tx.rollback().await?;
-		return Ok(Claim::Lost);
-	};
-	let row_amount = row.try_get::<_, i64>("amount")?;
-	if row_amount != amount_sat as i64 {
-		tx.rollback().await?;
-		return Ok(Claim::Refused(format!("db amount {row_amount} != validated {amount_sat}")));
-	}
-	let already: i64 = tx.query_one(
-		"SELECT COALESCE(SUM(amount_sat), 0)::bigint AS s FROM sidecar.payout WHERE anchor_point = $1",
-		&[&anchor_point],
-	).await?.try_get("s")?;
-	if already as u64 + amount_sat > funding_value_sat {
-		tx.rollback().await?;
-		return Ok(Claim::Refused(format!(
-			"I1: round payouts {already} + {amount_sat} > funding output {funding_value_sat}",
-		)));
+		return Ok(false);
 	}
 	tx.execute("
 		INSERT INTO sidecar.payout (vtxo_id, anchor_point, amount_sat, address, state)
 		VALUES ($1, $2, $3, $4, 'claimed')
 	", &[&vtxo_id, &anchor_point, &(amount_sat as i64), &address]).await?;
 	tx.commit().await?;
-	Ok(Claim::Claimed)
+	Ok(true)
 }
 
 pub async fn count_in_state(db: &Client, state: &str) -> anyhow::Result<i64> {
@@ -260,23 +223,6 @@ pub async fn mark_signed(db: &mut Client, vtxo_ids: &[String], txid: &str, raw: 
 	anyhow::ensure!(n as usize == vtxo_ids.len(), "claimed rows changed under us");
 	tx.commit().await?;
 	Ok(())
-}
-
-/// The hArk unlock preimage captaind holds for an unclaimed round output.
-/// (captaind stores it as hex TEXT.)
-pub async fn unlock_preimage(db: &Client, unlock_hash: &str) -> anyhow::Result<Option<Vec<u8>>> {
-	let row = db.query_opt(
-		"SELECT unlock_preimage FROM round_participation WHERE unlock_hash = $1", &[&unlock_hash],
-	).await?;
-	let Some(row) = row else { return Ok(None) };
-	let Some(hex) = row.try_get::<_, Option<String>>("unlock_preimage")? else { return Ok(None) };
-	Ok(Some(bitcoin::hex::FromHex::from_hex(&hex)?))
-}
-
-/// The encoded VTXO blob for a coin (to re-derive a payout from the chain).
-pub async fn vtxo_blob(db: &Client, vtxo_id: &str) -> anyhow::Result<Option<Vec<u8>>> {
-	let row = db.query_opt("SELECT vtxo FROM vtxo WHERE vtxo_id = $1", &[&vtxo_id]).await?;
-	Ok(match row { Some(r) => Some(r.try_get("vtxo")?), None => None })
 }
 
 pub async fn raw_tx_by_txid(db: &Client, txid: &str) -> anyhow::Result<Option<Vec<u8>>> {

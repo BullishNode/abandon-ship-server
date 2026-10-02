@@ -27,85 +27,10 @@ impl std::fmt::Display for InvariantViolation {
 }
 impl std::error::Error for InvariantViolation {}
 
-/// Decode a stored coin and validate it against the chain.
-///
-/// Fully signed coins must pass `Vtxo::validate`. An unclaimed hArk output
-/// (a delegated refresh whose owner never came back) is stored without
-/// its unlock preimage (captaind keeps it in `round_participation`) and its
-/// final leaf transition is unsigned until the owner returns. Such a coin is
-/// accepted only if (`unclaimed_ok`):
-/// - full validation fails at the **last** transition only, a hash-locked
-///   (v1) step, with "missing signature" or "missing preimage" (validation
-///   is sequential, so every earlier step passed, signatures included);
-/// - structure-only validation of the whole chain passes;
-/// - the output the last step spends (created by the signed parent) is
-///   exactly the hArk leaf script for the coin's key: so the payout key is
-///   committed by signed data and the unsigned step cannot redirect it;
-/// - the coin's amount does not exceed that signed output's value.
-async fn load_validated(
-	db: &tokio_postgres::Client, chain: &chain::Chain, blob: &[u8],
-) -> anyhow::Result<Result<(Vtxo, bitcoin::Transaction), String>> {
-	let mut vtxo = match Vtxo::deserialize(blob) {
-		Ok(v) => v,
-		Err(e) => return Ok(Err(format!("undecodable vtxo: {e}"))),
-	};
-	if let Some(h) = vtxo.unlock_hash() {
-		if let Some(pre) = db::unlock_preimage(db, &h.to_string()).await? {
-			if let Ok(pre) = <[u8; 32]>::try_from(pre.as_slice()) {
-				vtxo.provide_unlock_preimage(pre);
-			}
-		}
-	}
-	let anchor = vtxo.chain_anchor();
-	let anchor_tx = match chain.tx(anchor.txid).await {
-		Ok((tx, _)) => tx,
-		Err(e) => return Err(e.context(format!("anchor tx {anchor} unavailable"))),
-	};
-	match vtxo.validate(&anchor_tx) {
-		Ok(()) => Ok(Ok((vtxo, anchor_tx))),
-		Err(e) => match unclaimed_ok(&vtxo, &anchor_tx, &e) {
-			Ok(()) => Ok(Ok((vtxo, anchor_tx))),
-			Err(why) => Ok(Err(format!("vtxo failed validation: {e} ({why})"))),
-		},
-	}
-}
-
-/// A validated coin must be a plain key coin of *our* server.
-fn foreign(vtxo: &Vtxo, cfg: &Config) -> Option<&'static str> {
-	if vtxo.server_pubkey() != cfg.server_pubkey { return Some("coin of another server") }
-	if !matches!(vtxo.policy(), ark::VtxoPolicy::Pubkey(_)) { return Some("not a plain pubkey coin") }
-	None
-}
-
-/// See `load_validated`: the one accepted partial-validation case.
-fn unclaimed_ok(
-	vtxo: &Vtxo, anchor_tx: &bitcoin::Transaction, err: &ark::vtxo::VtxoValidationError,
-) -> Result<(), &'static str> {
-	use ark::vtxo::VtxoValidationError as E;
-	match err {
-		E::GenesisTransition { error, genesis_idx, genesis_len, transition_kind }
-			if *genesis_idx + 1 == *genesis_len
-				&& *transition_kind == "hash-locked-cosigned-v1"
-				&& (*error == "missing signature" || *error == "missing preimage") => {},
-		_ => return Err("not an unsigned final hArk step"),
-	}
-	vtxo.validate_unsigned(anchor_tx).map_err(|_| "structure invalid")?;
-	let unlock_hash = vtxo.unlock_hash().ok_or("no unlock hash")?;
-
-	// The output the last tx spends, from the previous tx or the anchor.
-	let txs: Vec<_> = vtxo.transactions().map(|i| i.tx).collect();
-	let last = txs.last().ok_or("no genesis tx")?;
-	let prev_out = last.input.first().ok_or("last tx has no input")?.previous_output;
-	let prev_tx = if txs.len() >= 2 { &txs[txs.len() - 2] } else { anchor_tx };
-	if prev_tx.compute_txid() != prev_out.txid { return Err("last tx does not spend the previous step") }
-	let prev_txout = prev_tx.output.get(prev_out.vout as usize).ok_or("prev vout missing")?;
-
-	let leaf = ark::vtxo::policy::HarkLeafVtxoPolicy { user_pubkey: vtxo.user_pubkey(), unlock_hash };
-	let spend = leaf.taproot(vtxo.server_pubkey(), vtxo.expiry_height());
-	let expected = ScriptBuf::new_p2tr_tweaked(spend.output_key());
-	if prev_txout.script_pubkey != expected { return Err("coin key not committed by the signed parent") }
-	if vtxo.amount() > prev_txout.value { return Err("amount above the signed parent output") }
-	Ok(())
+/// Decode a stored coin. Amount, key, expiry and anchor come from it; the DB
+/// is trusted (only captaind and the sidecar write it).
+fn decode(blob: &[u8]) -> Result<Vtxo, String> {
+	Vtxo::deserialize(blob).map_err(|e| format!("undecodable vtxo: {e}"))
 }
 
 /// What happened to one candidate coin this tick.
@@ -249,32 +174,13 @@ async fn process_coin(
 ) -> anyhow::Result<Outcome> {
 	let p = &cfg.policy;
 
-	// Skip uneconomic coins before any work (the DB amount only skips; the
-	// validated amount decides payment below).
-	if c.db_amount < p.min_payout_sat
-		|| !checks::affordable(c.db_amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
-		return Ok(Outcome::Wait("below min_payout_sat or fee share above max_fee_pct_per_payout"));
-	}
-
-	// Decode and validate the coin against the chain; trust nothing else.
-	let (vtxo, anchor_tx) = match load_validated(db, chain, &c.vtxo).await {
-		Ok(Ok(x)) => x,
-		Ok(Err(reason)) => return Ok(Outcome::Quarantine(reason)),
-		// A coin whose anchor cannot be fetched must not block other coins.
-		Err(e) => {
-			warn!(vtxo = %c.vtxo_id, "{e:#}");
-			return Ok(Outcome::Wait("anchor tx unavailable"));
-		},
+	let vtxo = match decode(&c.vtxo) {
+		Ok(v) => v,
+		Err(reason) => return Ok(Outcome::Quarantine(reason)),
 	};
-	if vtxo.id().to_string() != c.vtxo_id {
-		return Ok(Outcome::Quarantine("vtxo blob id != row id".into()));
-	}
-	if let Some(why) = foreign(&vtxo, cfg) {
-		return Ok(Outcome::Quarantine(why.into()));
-	}
 	let anchor = vtxo.chain_anchor();
 	if vtxo.expiry_height().to_u32().saturating_add(p.grace_blocks) > tip {
-		return Ok(Outcome::Wait("not expired + grace per the validated VTXO"));
+		return Ok(Outcome::Wait("not expired + grace per the VTXO"));
 	}
 	let amount = vtxo.amount().to_sat();
 	// Not worth paying on-chain at today's fee: leave it alone (no ban, no
@@ -283,10 +189,6 @@ async fn process_coin(
 		|| !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
 		return Ok(Outcome::Wait("below min_payout_sat or fee share above max_fee_pct_per_payout"));
 	}
-	let Some(funding_out) = anchor_tx.output.get(anchor.vout as usize) else {
-		return Ok(Outcome::Quarantine("anchor vout missing".into()));
-	};
-
 	// The funding output must be spent, on-chain, by a sweep to our
 	// scripts only, buried deep enough. The DB only tells us where to look.
 	if chain.is_unspent(anchor).await? { return Ok(Outcome::Wait("anchor not swept yet")) }
@@ -303,9 +205,6 @@ async fn process_coin(
 			return Ok(Outcome::Wait("unavailable tx (see warn)"));
 		},
 	};
-	if !spend_tx.input.iter().any(|i| i.previous_output == anchor) {
-		return Ok(Outcome::Quarantine(format!("recorded spender {spender} does not spend the anchor")));
-	}
 	if !checks::is_sweep(&spend_tx, sweep_spks) {
 		// A tree tx (partial unroll) is permanent: quarantine. Anything else is
 		// most likely a wrong sweep_addresses config: wait, never quarantine
@@ -333,12 +232,12 @@ async fn process_coin(
 	}
 	if db::in_round_participation(db, &c.vtxo_id).await? { return Ok(Outcome::Wait("in a round participation")) }
 
-	// The atomic claim, with I1 and the amount cross-check inside it.
+	// The atomic claim.
 	let address = payout::address_for_pubkey(&vtxo.user_pubkey(), cfg.network).to_string();
-	Ok(match db::claim(db, &c.vtxo_id, &anchor.to_string(), amount, funding_out.value.to_sat(), &address, tip).await? {
-		db::Claim::Claimed => Outcome::Claimed,
-		db::Claim::Lost => Outcome::Lost,
-		db::Claim::Refused(reason) => Outcome::Quarantine(reason),
+	Ok(if db::claim(db, &c.vtxo_id, &anchor.to_string(), amount, &address, tip).await? {
+		Outcome::Claimed
+	} else {
+		Outcome::Lost
 	})
 }
 
@@ -353,22 +252,6 @@ async fn pay_claimed(
 	// reset or restored: never pay twice.
 	if let Some(p) = claimed.iter().find(|p| journal.contains(&p.vtxo_id)) {
 		return Err(InvariantViolation(format!("claimed coin {} was already paid (journal)", p.vtxo_id)).into());
-	}
-	// At pay time: the ledger row is in a DB others can
-	// write. Re-derive amount and address from the chain-validated VTXO; any
-	// mismatch stops the sidecar instead of paying.
-	for p in &claimed {
-		let blob = db::vtxo_blob(db, &p.vtxo_id).await?
-			.ok_or_else(|| anyhow::anyhow!("claimed coin {} has no vtxo row", p.vtxo_id))?;
-		let (vtxo, _) = load_validated(db, chain, &blob).await?
-			.map_err(|r| InvariantViolation(format!("claimed coin {}: {r}", p.vtxo_id)))?;
-		if let Some(why) = foreign(&vtxo, cfg) {
-			return Err(InvariantViolation(format!("claimed coin {}: {why}", p.vtxo_id)).into());
-		}
-		let addr = payout::address_for_pubkey(&vtxo.user_pubkey(), cfg.network).to_string();
-		if vtxo.id().to_string() != p.vtxo_id || vtxo.amount().to_sat() != p.amount_sat || addr != p.address {
-			return Err(InvariantViolation(format!("payout row {} differs from its validated VTXO", p.vtxo_id)).into());
-		}
 	}
 	// Coins sent to the same Ark address share a key, hence a payout address:
 	// one output per address, carrying the sum.

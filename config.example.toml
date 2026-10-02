@@ -1,5 +1,4 @@
 # Copy to config.toml (git-ignored). Values below are regtest examples.
-server_pubkey = "02..."      # captaind server pubkey (hex)
 network = "regtest"
 journal_path = "/var/lib/abandon-ship/payouts.journal"  # local disk, back up separately
 poll_interval_secs = 10
