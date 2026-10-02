@@ -16,22 +16,13 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
 4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, not paid, not quarantined. If unpaid claims exist, pay those first and claim nothing new.
 5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
-   1. **Amount.** Skip if below `min_payout_sat`, or if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
-   2. **Chain validation.** Decode the stored VTXO and run `Vtxo::validate(&anchor_tx)`. Amount, key and expiry come from the validated VTXO, never from DB columns. It must be a `Pubkey`-policy coin of `server_pubkey`.
-   3. **Unclaimed outputs.** Coins whose last hArk step is unsigned (owner not back yet) are accepted only if:
-      - validation fails at that last step alone;
-      - `validate_unsigned` passes;
-      - the output it spends, which the signed parent creates, equals `HarkLeafVtxoPolicy{coin key, unlock_hash}.taproot()`.
-   4. **Sweep.** The anchor (round funding output) must be spent by a tx paying only the configured `sweep_addresses` (ignoring OP_RETURN and P2A), buried `sweep_min_confs`. A tree tx spending it means the round was partially unrolled: quarantine.
-   5. **In flight.** Skip while a round participation still references the coin.
-   6. **Ban, then wait.** Set `banned_until_height`, then wait `ban_wait_secs`. The claim needs that exact ban still in place: if an operator lifts it, the wait restarts.
-   7. **Claim.** In one transaction, serialised per round:
-      - `UPDATE vtxo SET spend_state='spent' WHERE … spend_state IN ('spendable','unclaimed') AND <our ban>`;
-      - check that the DB amount equals the validated amount;
-      - check that the round's payouts stay at or below the funding output;
-      - insert the payout row.
+   1. **Decode.** Amount, key, expiry and anchor come from the stored VTXO. An undecodable one is quarantined.
+   2. **Amount.** Skip if below `min_payout_sat`, or if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
+   3. **Sweep.** The anchor (round funding output) must be spent by a tx paying only the configured `sweep_addresses` (ignoring OP_RETURN and P2A), buried `sweep_min_confs`. A tree tx spending it means the round was partially unrolled: quarantine.
+   4. **In flight.** Skip while a round participation still references the coin.
+   5. **Ban, then wait.** Set `banned_until_height`, then wait `ban_wait_secs`. The claim needs that exact ban still in place: if an operator lifts it, the wait restarts.
+   6. **Claim.** In one transaction: `UPDATE vtxo SET spend_state='spent' WHERE … spend_state IN ('spendable','unclaimed') AND <our ban>`, then insert the payout row.
 6. **Pay.** For all claimed coins, in one batch:
-   - re-derive each row's address and amount from the chain-validated VTXO;
    - one output per address, fee subtracted from the outputs, funded at the checked rate;
    - verify the tx: exact outputs, at most one change output owned by the wallet, per-output fee share;
    - store it in the DB, then append it to the journal (fsync), then broadcast.
@@ -52,7 +43,6 @@ See `config.example.toml`. The keys:
 
 | Key | Meaning |
 | --- | --- |
-| `server_pubkey` | captaind's server key |
 | `journal_path` | local payout journal |
 | `postgres.conninfo` | captaind's database |
 | `postgres.allowed_schema_versions` | allowlisted captaind schema versions |
@@ -78,7 +68,7 @@ cargo run --release -- config.toml --once    # one tick
 RUST_LOG=abandon_ship_server=debug ...       # logs why each coin waits
 ```
 
-Tables are created by the DB admin (`migrations/0001_sidecar.sql`). Setup and runbooks: `docs/deployment.md`. Scope, failures and guards: `docs/design.md`.
+Tables: apply `migrations/0001_sidecar.sql` once. Setup and runbooks: `docs/deployment.md`. Scope, failures and guards: `docs/design.md`.
 
 ## Layout
 
