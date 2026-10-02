@@ -59,6 +59,11 @@ P=$(api POST $B /api/v1/wallet/vtxos/expiry-payouts "{\"vtxo_ids\":[\"$ID\"]}")
 check "payout found after 1 conf" eq "$(echo "$P" | jlen)" 1
 check "found payout is the ledger tx" grep -q "$TXID" <<< "$P"
 
+# J16: barkd restarts; the adopted spent state and the payout survive.
+docker restart $C > /dev/null; up $B
+check "J16: coin still spent after a barkd restart" eq "$(api GET $B /api/v1/wallet/vtxos/$ID | python3 -c "import json,sys;print(json.load(sys.stdin)['state']['type'])")" spent
+check "J16: payout still found after a barkd restart" grep -q "$TXID" <<< "$(api POST $B /api/v1/wallet/vtxos/expiry-payouts)"
+
 # J6: restore the seed on a second barkd before the sweep.
 # The mnemonic goes from one container to the other, never to the terminal.
 barkd $C2 $B2
