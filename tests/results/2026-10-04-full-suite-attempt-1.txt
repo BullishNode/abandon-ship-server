@@ -1,0 +1,50 @@
+schema-version         PASS   10s  
+happy-single           PASS   85s  
+happy-batch            PASS  105s  
+shared-address         PASS   66s  
+unclaimed-delegated    PASS   62s  
+race-held-lock         PASS   98s  
+race-user-refresh      PASS  210s  
+race-operator-unban    PASS  206s  
+h2-probe               FAIL  307s  probe 2 reached a round
+exit-full              PASS   76s  
+exit-breaker           PASS  124s  
+exit-blocked           PASS   87s  
+attack-ban-wait        PASS  187s  
+tamper-payout          PASS   88s  
+db-restore             PASS  125s  
+crash-signed           PASS   94s  
+fee-pct-rule           PASS  116s  
+fee-stuck-claim        PASS  124s  
+fee-window             PASS  210s  
+fee-no-estimate        PASS  131s  
+circuit-breaker        PASS  108s  
+infra-bitcoind         PASS   91s  
+infra-postgres         PASS   82s  
+web-journey            PASS   97s  
+
+schema-version         PASS   10s  
+happy-single           PASS   85s  
+happy-batch            PASS  105s  
+shared-address         PASS   66s  
+unclaimed-delegated    PASS   62s  
+race-held-lock         PASS   98s  
+race-user-refresh      PASS  210s  
+race-operator-unban    PASS  206s  
+h2-probe               FAIL  307s  probe 2 reached a round
+exit-full              PASS   76s  
+exit-breaker           PASS  124s  
+exit-blocked           PASS   87s  
+attack-ban-wait        PASS  187s  
+tamper-payout          PASS   88s  
+db-restore             PASS  125s  
+crash-signed           PASS   94s  
+fee-pct-rule           PASS  116s  
+fee-stuck-claim        PASS  124s  
+fee-window             PASS  210s  
+fee-no-estimate        PASS  131s  
+circuit-breaker        PASS  108s  
+infra-bitcoind         PASS   91s  
+infra-postgres         PASS   82s  
+web-journey            PASS   97s  
+full suite exit 1
