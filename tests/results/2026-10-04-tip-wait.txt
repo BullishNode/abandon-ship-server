@@ -1,0 +1,19 @@
+Harness captaind tip-wait regression — 2026-10-04
+Extracted actual before/after functions; mocked tip, SQL height and elapsed time only. No stack mutation.
+An advancing chain requires 800 virtual seconds; a stalled chain never advances.
+
+before advancing: exit 1 (expected 1)
+exit=1 virtual_seconds=180
+captaind still behind the tip
+
+before stalled: exit 1 (expected 1)
+exit=1 virtual_seconds=180
+captaind still behind the tip
+
+after advancing: exit 0 (expected 0)
+exit=0 virtual_seconds=801
+
+after stalled: exit 2 (expected 2)
+setup failed: captaind stalled at 0, waiting for 400
+
+4 checks PASS / 0 FAIL. This is a helper regression, not a full-suite pass.

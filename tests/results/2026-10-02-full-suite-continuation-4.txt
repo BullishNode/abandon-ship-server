@@ -1,0 +1,15 @@
+schema-version         PASS    5s
+happy-single           PASS  134s
+happy-batch            PASS  140s
+shared-address         PASS  137s
+unclaimed-delegated    PASS  124s
+race-held-lock         PASS  126s
+race-user-refresh      PASS  252s
+race-operator-unban    PASS  356s
+h2-probe               PASS 1179s
+exit-full              PASS  298s
+exit-breaker           PASS  360s
+exit-blocked           PASS  293s
+attack-ban-wait        PASS  397s
+tamper-payout          PASS  276s
+db-restore             FAIL 1449s  exit 2 without a result; see db-restore.stderr

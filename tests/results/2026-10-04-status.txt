@@ -1,0 +1,30 @@
+Abandon-ship server test evidence — 2026-10-04
+
+There is NO clean full-suite pass in these results.
+Production Rust source in the recorded suite runs: 93d31fb.
+Harness committed as 67e8536 includes later corrections; the full suite has
+NOT completed against that harness. The intervening 1750e2b changes docs only.
+
+2026-10-02 continuation attempt 1: setup failed, zero scenarios completed.
+Attempt 2: COMPLETE, 23 PASS / 1 FAIL, exit 1. The sole failure was fee-window:
+its intended large eligible payout succeeded, but an extra assertion required
+unaffordable incidental change to pay. That assertion has since been removed.
+Attempt 3: INTERRUPTED, exit 143; 11 PASS / 1 scenario FAIL / 2 setup FAIL.
+The older runner printed blanks for the setup failures. They are failures,
+not passes. H2 round-counter timing and depleted rounds funding were corrected.
+H2 independent verification: PASS 542s and PASS 556s, all four offsets each.
+Attempt 4: INCOMPLETE, 14 PASS / 1 setup FAIL; remaining cases not completed.
+db-restore failed before its restore assertions because captaind lagged the tip
+(height 55821, waiting for 55854). There is no final full-suite exit status.
+
+Oct 4 server cargo test: 4 PASS / 0 FAIL.
+Oct 4 mocked tip-wait checks: 4 PASS / 0 FAIL. An advancing chain succeeds
+past the previous timeout; a stalled chain fails. This does not validate a
+complete Docker suite. Changed shell scripts pass bash -n and git diff --check.
+
+run-all.sh prints each result during execution and repeats the final table.
+Repeated rows in a completed log are not additional test cases. Scenario logs
+under /tmp can be overwritten; these saved reports retain the run summaries.
+The raw per-case archives are outside this repo under
+~/bark-integration-2026-10-01/session2-continuation/.
+Trailing whitespace is normalized in committed report copies; results are unchanged.
