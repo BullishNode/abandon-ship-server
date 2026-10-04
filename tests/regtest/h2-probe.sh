@@ -8,23 +8,25 @@
 mkcfg ban_wait_secs=45
 cd "$R"
 START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-CAP0=$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' abandon-regtest-captaind-1)
+CAP0=$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$PROJECT-captaind-1")
 OFFSETS=(pre 0.5 2 4.5)
-WS=(); XS=()
-for i in 0 1 2 3; do
-	WS+=("$(wname p$i)"); newwallet "${WS[$i]}"
-	round 60000 "${WS[$i]}"; XS+=("$(coins "${WS[$i]}")")
-	mine 50   # staggered expiries: one candidate per probe
-done
 rounds() { docker compose logs --since "$START" captaind 2>&1 | grep -c 'Round started'; }
 
 for i in 0 1 2 3; do
-	W=${WS[$i]}; X=${XS[$i]}; O=${OFFSETS[$i]}
+	W=$(wname p$i); O=${OFFSETS[$i]}
+	newwallet "$W"; round 60000 "$W"; X=$(coins "$W")
 	expire_and_sweep "$X" || finish
-	"$R/bark" "$W" refresh --vtxo "$X" > "$LOG/refresh-$i.log" 2>&1 & P=$!
-	until grep -q 'Waiting for a round start' "$LOG/refresh-$i.log"; do sleep 0.2; done
+	N=$(rounds)
+	timeout 120 "$R/bark" "$W" refresh --vtxo "$X" > "$LOG/refresh-$i.log" 2>&1 & P=$!
+	until grep -q 'Waiting for a round start' "$LOG/refresh-$i.log"; do
+		kill -0 "$P" 2>/dev/null || { check "probe $O reached the round wait" false; finish; }
+		sleep 0.2
+	done
 	if [ "$O" != pre ]; then
-		N=$(rounds); until [ "$(rounds)" -gt "$N" ]; do sleep 0.1; done
+		until [ "$(rounds)" -gt "$N" ]; do
+			kill -0 "$P" 2>/dev/null || { check "probe $O reached a round" false; finish; }
+			sleep 0.1
+		done
 		sleep "$O"
 	fi
 	tick
@@ -40,7 +42,7 @@ for i in 0 1 2 3; do
 	say "probe $O: refreshed='${REFRESHED}' payout='${PAID}'"
 	check "probe $O: exactly one winner" test -n "$REFRESHED$PAID" -a -z "$( [ -n "$REFRESHED" ] && [ -n "$PAID" ] && echo both)"
 done
-check "captaind never restarted" eq "$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' abandon-regtest-captaind-1)" "$CAP0"
+check "captaind never restarted" eq "$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$PROJECT-captaind-1")" "$CAP0"
 check "no fatal round error" eq "$(docker compose logs --since "$START" captaind 2>&1 | grep -cE 'Fatal round error|critical worker stopped')" 0
 confirm_payouts
 finish

@@ -9,7 +9,8 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 R=$ROOT/regtest
-BIN=$ROOT/target/debug/abandon-ship-server
+BIN=${BIN:-$ROOT/target/debug/abandon-ship-server}
+PROJECT=${COMPOSE_PROJECT_NAME:-abandon-regtest}
 JOURNAL=$R/payouts.journal
 NAME=$(basename "$0" .sh)
 RUN=${RUN:-$(date +%s)}
@@ -23,11 +24,14 @@ SWEEP_CONFS=6
 
 say() { echo "[$NAME] $*" >&2; }
 btc() { "$R/btc" "$@"; }
-mine() { btc -rpcwallet=faucet -generate "${1:-1}" >/dev/null; }
+mine() {
+	btc -rpcwallet=faucet -generate "${1:-1}" >/dev/null || exit 2
+	captaind_synced
+}
 tip() { btc getblockcount; }
 # Admin query (postgres superuser = captaind's DB owner): one value per line.
 q() { "$R/psql" -At -F'|' -c "$1"; }
-bark() { "$R/bark" "$@" 2>/dev/null; }
+bark() { "$R/bark" "$@" 2>> "$LOG/bark.stderr"; }
 
 # --- assertions ---------------------------------------------------------------
 
@@ -61,7 +65,6 @@ finish() {
 CFG=$LOG/sidecar.toml
 mkcfg() {
 	sed -e 's/^user = .*/user = "second"/' -e 's/^pass = .*/pass = "ark"/' \
-		-e 's#^conninfo = .*#conninfo = "host=127.0.0.1 port=45432 user=postgres password=abandon-regtest dbname=bark-server-db"#' \
 		-e "s#^journal_path = .*#journal_path = \"$JOURNAL\"#" \
 		-e 's/^ban_wait_secs = .*/ban_wait_secs = 3/' "$R/sidecar.toml" > "$CFG"
 	local kv
@@ -122,12 +125,35 @@ newwallet() {
 }
 wname() { echo "t-$NAME-$RUN-$1"; }
 
-# After many blocks captaind's chain view lags bitcoind's, and it refuses
-# boards ("requested VTXO lifetime ... is too high"): wait (max 3 min) until it
-# has processed the tip.
+# Expiry tests drain the rounds wallet into watchmand's separate sweep wallet.
+# Keep repeated suites funded from the regtest faucet.
+ensure_round_funding() {
+	local balance address info
+	info=$("$R/captaind" rpc wallet | python3 -c 'import json,sys; w=json.load(sys.stdin)["rounds"]; print(w["trusted_balance"],w["address"])') || return 1
+	read -r balance address <<< "$info"
+	if [ "$balance" -lt 200000000 ]; then
+		btc -rpcwallet=faucet -named sendtoaddress address="$address" amount=20 fee_rate=5 > /dev/null || return 1
+		mine 2
+	fi
+}
+
+# Wait for mined blocks before boarding or reading the ledger. Slow progress
+# is allowed; ten minutes without progress fails setup.
 captaind_synced() {
-	local i; for i in $(seq 90); do [ "$(q "SELECT max(height) FROM captaind_block")" -ge "$(tip)" ] && return 0; sleep 2; done
-	say "captaind still behind the tip"; return 1
+	local target height previous=-1 deadline=$((SECONDS + 600))
+	target=$(tip) || exit 2
+	while true; do
+		height=$(q "SELECT coalesce(max(height), 0) FROM captaind_block") || exit 2
+		[ "$height" -ge "$target" ] && return 0
+		if [ "$height" -gt "$previous" ]; then
+			previous=$height
+			deadline=$((SECONDS + 600))
+		fi
+		(( SECONDS < deadline )) || break
+		sleep 2
+	done
+	say "setup failed: captaind stalled at $height, waiting for $target"
+	exit 2
 }
 
 # round <sat> <wallet>...: board <sat> per wallet, then refresh all of them
@@ -135,14 +161,17 @@ captaind_synced() {
 round() {
 	local amt=$1; shift
 	local w pids=()
-	mine 1; captaind_synced
-	for w in "$@"; do bark "$w" board "$amt sat" > "$LOG/board-$w.log" || say "board failed: $w"; done
+	ensure_round_funding || { say "cannot fund captaind's rounds wallet"; exit 2; }
+	mine 1
+	for w in "$@"; do bark "$w" board "$amt sat" > "$LOG/board-$w.log" || { say "board failed: $w"; exit 2; }; done
 	mine 4
 	for w in "$@"; do bark "$w" balance > /dev/null; done
 	for w in "$@"; do bark "$w" refresh --all > "$LOG/refresh-$w.log" & pids+=($!); done
-	for w in "${pids[@]}"; do wait "$w"; done
+	for w in "${pids[@]}"; do wait "$w" || { say "round setup failed"; exit 2; }; done
 	mine 3
-	for w in "$@"; do bark "$w" balance > /dev/null; done
+	for w in "$@"; do
+		[ "$(coins "$w" | wc -w)" = 1 ] || { say "round setup: $w has no single spendable coin"; exit 2; }
+	done
 }
 
 # Ids of a wallet's coins in a given client state (default spendable).
@@ -182,7 +211,7 @@ expire_and_sweep() { # expire_and_sweep <ids>
 		[ $spent = 1 ] && break
 		mine 1; sleep 3
 	done
-	[ $spent = 1 ] || { say "anchors not swept: $anchors"; return 1; }
+	[ $spent = 1 ] || { check "anchors swept: $anchors" false; return 1; }
 	mine $SWEEP_CONFS
 	ensure_fees
 }
@@ -275,7 +304,7 @@ loop_exit() {
 healthy() {
 	local i s
 	for i in $(seq "${2:-120}"); do
-		s=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "abandon-regtest-$1-1" 2>/dev/null)
+		s=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$PROJECT-$1-1" 2>/dev/null)
 		[ "$s" = healthy ] || [ "$s" = running ] && return 0
 		sleep 1
 	done

@@ -5,8 +5,8 @@
 # restore the seed on a second barkd, sweep, and check that the money shows once.
 # Each barkd here is a fresh container with a fresh wallet, removed at the end.
 . "$(dirname "$0")/lib.sh"
-B=127.0.0.1:43010 B2=127.0.0.1:43011 NET=abandon-regtest_default
-C=abandon-regtest-web-journey C2=abandon-regtest-web-journey-restore
+B=127.0.0.1:43010 B2=127.0.0.1:43011 NET=${PROJECT}_default
+C=$PROJECT-web-journey C2=$PROJECT-web-journey-restore
 api() { curl -s -X "$1" "$2$3" -H 'content-type: application/json' -d "${4:-{\}}"; } # api <method> <host> <path> [json]
 jlen() { python3 -c "import json,sys; print(len(json.load(sys.stdin)))"; }
 barkd() { # barkd <container> <host:port>
@@ -25,7 +25,7 @@ print(sum(m['subsystem']['kind'] == 'expiry-payout' for m in json.load(sys.stdin
 
 mkcfg
 BIRTH=$(tip)
-barkd $C $B; create $B; up $B || { say "no barkd wallet (image abandon-ship/bark:variant-b?)"; finish; }
+barkd $C $B; create $B; up $B || { check "barkd wallet ready" false; finish; }
 A=$(api POST $B /api/v1/onchain/addresses/next | python3 -c "import json,sys;print(json.load(sys.stdin)['address'])")
 btc -rpcwallet=faucet -named sendtoaddress address="$A" amount=0.01 fee_rate=5 > /dev/null; mine 1; api POST $B /api/v1/onchain/sync > /dev/null
 

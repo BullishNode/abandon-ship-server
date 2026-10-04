@@ -1,9 +1,9 @@
 # captaind config for the regtest stack (test-only values).
 data_dir = "/data/captaind"
 network = "regtest"
-vtxo_lifetime = 300
+vtxo_lifetime = 64
 min_board_amount = "20000 sat"
-vtxo_exit_delta = 144
+vtxo_exit_delta = 12
 max_vtxo_exit_depth = 100
 max_arkoor_fanout = 4
 required_board_confirmations = 3
@@ -79,8 +79,8 @@ ppm_expiry_table = [
 [vtxopool]
 vtxo_targets = [ "10000sat:10", "1000000sat:10" ]
 vtxo_target_issue_threshold = 80
-vtxo_lifetime = 300
-vtxo_pre_expiry = 50
+vtxo_lifetime = 64
+vtxo_pre_expiry = 10
 max_vtxo_exit_depth = 3
 
 [fee_estimator]

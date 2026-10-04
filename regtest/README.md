@@ -1,6 +1,6 @@
 # regtest
 
-Docker stack for testing: `bitcoind` (Core 31, no `-fallbackfee`), `postgres`, `cln` (hold plugin), `captaind` and `watchmand` (bark nightly-2026-10-01 = master `6768e0fb4`), plus a `bark` CLI service for wallets. Coin lifetime is 300 blocks and the sweep interval 30 s. All credentials are test-only.
+Docker stack for testing: `bitcoind` (Core 31, no `-fallbackfee`), `postgres`, `cln` (hold plugin), `captaind` and `watchmand` (bark nightly-2026-10-01 = master `6768e0fb4`), plus a `bark` CLI service for wallets. Coin lifetime is 64 blocks, exit delay 12 blocks and sweep interval 30 s. All credentials are test-only.
 
 ## Setup
 
@@ -27,3 +27,5 @@ Docker stack for testing: `bitcoind` (Core 31, no `-fallbackfee`), `postgres`, `
 | `./seed-fees [blocks]` | fee-paying txs, so the estimator has data |
 
 `sidecar.toml`, `watchmand.toml` and `payouts.journal` are git-ignored.
+
+`tests/regtest/run-all.sh` runs the scenarios. The harness waits for captaind's recorded tip after mining (failing after ten minutes without progress) and tops up its rounds wallet from the faucet by 20 BTC when its trusted balance falls below 2 BTC. Scenario stdout and stderr are saved under `$OUT` (default `/tmp/abandon-regtest`).

@@ -13,6 +13,7 @@ SCENARIOS=(${@:-schema-version happy-single happy-batch shared-address unclaimed
 
 (cd "$ROOT" && cargo build -q) || { echo "build failed"; exit 2; }
 for s in bitcoind postgres captaind watchmand; do healthy "$s" 60 || { echo "stack: $s not up"; exit 2; }; done
+ensure_round_funding || { echo "cannot fund captaind's rounds wallet"; exit 2; }
 
 # Drain what earlier runs left: no claimed or signed rows may block the suite.
 mkcfg; ensure_fees
@@ -24,7 +25,12 @@ export RUN OUT
 RESULTS=()
 for s in "${SCENARIOS[@]}"; do
 	T0=$(date +%s)
-	LINE=$(bash "./$s.sh" 2> "$OUT/$s.stderr" | tail -1)
+	LINE=$(bash "./$s.sh" 2> "$OUT/$s.stderr" | tee "$OUT/$s.stdout" | tail -1); RC=$?
+	case "$LINE" in
+		"PASS $s") [ "$RC" = 0 ] || LINE="FAIL $s: exit $RC after PASS" ;;
+		"FAIL $s:"*) ;;
+		*) LINE="FAIL $s: exit $RC without a result; see $s.stderr" ;;
+	esac
 	RESULTS+=("$(printf '%-22s %-4s %4ss  %s' "$s" "${LINE%% *}" $(( $(date +%s) - T0 )) "$(sed -n 's/^FAIL [^:]*: //p' <<< "$LINE")")")
 	echo "${RESULTS[-1]}"
 done
