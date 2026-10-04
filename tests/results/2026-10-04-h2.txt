@@ -1,0 +1,26 @@
+2026-10-04 H2 synchronization verification
+Baseline Rust: 93d31fb; only the harness changed.
+Fresh abandon-verify stack; original volumes preserved.
+PASS h2-probe, exit 0, 532 seconds.
+Four offsets exercised: pre, 0.5, 2, 4.5 seconds.
+[h2-probe] ok: probe pre: banned, or refreshed before the tick
+[h2-probe] probe pre: refreshed='' payout='broadcast'
+[h2-probe] ok: probe pre: exactly one winner
+[h2-probe] ok: probe 0.5: banned, or refreshed before the tick
+[h2-probe] probe 0.5: refreshed='34' payout=''
+[h2-probe] ok: probe 0.5: exactly one winner
+[h2-probe] ok: probe 2: banned, or refreshed before the tick
+[h2-probe] probe 2: refreshed='36' payout=''
+[h2-probe] ok: probe 2: exactly one winner
+[h2-probe] ok: probe 4.5: banned, or refreshed before the tick
+[h2-probe] probe 4.5: refreshed='38' payout=''
+[h2-probe] ok: probe 4.5: exactly one winner
+[h2-probe] ok: captaind never restarted
+[h2-probe] ok: no fatal round error
+[h2-probe] ok: every paid coin is spent and nothing else spent it
+[h2-probe] ok: every ledger row with a txid is journaled
+
+Earlier standalone correction: FAIL, exit 1, 293 seconds; no round
+events returned by Compose RFC3339 --since. This passing correction uses
+Docker epoch filtering and observes the submit window ending.
+The full suite still needs a new uninterrupted pass.

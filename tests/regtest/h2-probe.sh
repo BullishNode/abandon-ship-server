@@ -7,23 +7,31 @@
 . "$(dirname "$0")/lib.sh"
 mkcfg ban_wait_secs=45
 cd "$R"
-START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+START=$(date +%s)
 CAP0=$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$PROJECT-captaind-1")
 OFFSETS=(pre 0.5 2 4.5)
-rounds() { docker compose logs --since "$START" captaind 2>&1 | grep -c 'Round started'; }
+events() { docker logs --since "$START" "$PROJECT-captaind-1" 2>&1 | grep -c "$1"; }
 
 for i in 0 1 2 3; do
 	W=$(wname p$i); O=${OFFSETS[$i]}
 	newwallet "$W"; round 60000 "$W"; X=$(coins "$W")
 	expire_and_sweep "$X" || finish
-	N=$(rounds)
+	# Subscribe between submit windows. Starting during an already-open round
+	# can finish the refresh before the next "Round started" log we await.
+	N=$(events NoRoundPayments)
+	DEADLINE=$((SECONDS + 60))
+	until [ "$(events NoRoundPayments)" -gt "$N" ]; do
+		(( SECONDS < DEADLINE )) || { check "round clock running" false; finish; }
+		sleep 0.1
+	done
+	N=$(events RoundStarted)
 	timeout 120 "$R/bark" "$W" refresh --vtxo "$X" > "$LOG/refresh-$i.log" 2>&1 & P=$!
 	until grep -q 'Waiting for a round start' "$LOG/refresh-$i.log"; do
 		kill -0 "$P" 2>/dev/null || { check "probe $O reached the round wait" false; finish; }
 		sleep 0.2
 	done
 	if [ "$O" != pre ]; then
-		until [ "$(rounds)" -gt "$N" ]; do
+		until [ "$(events RoundStarted)" -gt "$N" ]; do
 			kill -0 "$P" 2>/dev/null || { check "probe $O reached a round" false; finish; }
 			sleep 0.1
 		done
@@ -43,6 +51,6 @@ for i in 0 1 2 3; do
 	check "probe $O: exactly one winner" test -n "$REFRESHED$PAID" -a -z "$( [ -n "$REFRESHED" ] && [ -n "$PAID" ] && echo both)"
 done
 check "captaind never restarted" eq "$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$PROJECT-captaind-1")" "$CAP0"
-check "no fatal round error" eq "$(docker compose logs --since "$START" captaind 2>&1 | grep -cE 'Fatal round error|critical worker stopped')" 0
+check "no fatal round error" eq "$(docker logs --since "$START" "$PROJECT-captaind-1" 2>&1 | grep -cE 'Fatal round error|critical worker stopped')" 0
 confirm_payouts
 finish
