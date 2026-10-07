@@ -48,15 +48,7 @@ impl Chain {
 		}).await
 	}
 
-	pub async fn tip(&self) -> anyhow::Result<u32> {
-		self.run(|c| { let h: u64 = c.call("getblockcount", &[])?; Ok(h as u32) }).await
-	}
 
-	/// A transaction and its confirmations (0 = mempool). Requires txindex.
-	///
-	/// Uses an untyped call and decodes the hex itself: bitcoincore-rpc 0.19's
-	/// typed result cannot parse Core 31's `anchor` (P2A) script type, which
-	/// every Ark tree tx carries.
 	pub async fn tx(&self, txid: Txid) -> anyhow::Result<(Transaction, u32)> {
 		self.run(move |c| {
 			let v: serde_json::Value = c.call("getrawtransaction", &[txid.to_string().into(), 1.into()])?;

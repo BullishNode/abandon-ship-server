@@ -1,13 +1,15 @@
 //! abandon-ship-server: pays expired, unrefreshed Ark coins on-chain to the
 //! coin's own key. See README.md and docs/design.md.
 
+mod captaind;
 mod chain;
 mod checks;
 mod config;
 mod db;
 mod journal;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
@@ -31,7 +33,6 @@ impl std::error::Error for InvariantViolation {}
 enum Outcome {
 	/// Not ready yet; the reason is logged at debug level.
 	Wait(&'static str),
-	Banned,
 	Claimed,
 	/// The user redeemed it first.
 	Lost,
@@ -47,7 +48,16 @@ async fn main() -> anyhow::Result<()> {
 
 	let mut args = std::env::args().skip(1);
 	let cfg_path = PathBuf::from(args.next().unwrap_or_else(|| "config.toml".into()));
-	let once = args.any(|a| a == "--once");
+	let mut once = false;
+	let mut export = None;
+	while let Some(arg) = args.next() {
+		match arg.as_str() {
+			"--once" => once = true,
+			"--export-settlement-ids" => export = Some(PathBuf::from(args.next()
+				.ok_or_else(|| anyhow::anyhow!("missing settlement ID output path"))?)),
+			_ => anyhow::bail!("unknown argument {arg}"),
+		}
+	}
 	let cfg = Config::load(&cfg_path)?;
 	let sweep_spks = cfg.policy.sweep_addresses.iter()
 		.map(|a| Ok(Address::from_str(a)?.require_network(cfg.network)
@@ -62,40 +72,40 @@ async fn main() -> anyhow::Result<()> {
 	// Earlier builds quarantined the whole round. Reconsider those coins
 	// under the exact-path rule; every payout still requires chain evidence.
 	db.execute("DELETE FROM sidecar.quarantine WHERE reason LIKE 'round partially unrolled by %'", &[]).await?;
-	let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
 	let mut journal = journal::Journal::open(&cfg.journal_path)?;
+	if let Some(path) = export {
+		reconcile_local(&mut db, &mut journal).await?;
+		let ids = db::payout_ids(&db).await?.into_iter().chain(journal.ids())
+			.collect::<BTreeSet<_>>();
+		let temp = path.with_extension("tmp");
+		let mut file = std::fs::File::create(&temp)?;
+		for id in &ids { writeln!(file, "{id}")?; }
+		file.sync_all()?;
+		std::fs::rename(&temp, &path)?;
+		let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+		std::fs::File::open(parent)?.sync_all()?;
+		info!(ids = ids.len(), path = %path.display(), "exported settlement IDs; keep writers stopped until captaind replays them");
+		return Ok(());
+	}
+	let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
+	let mut captaind = captaind::Captaind::new(&cfg.captaind_url)?;
 
 	loop {
 		// Infrastructure errors are retried next tick; only an invariant
 		// violation stops the process.
-		if let Err(e) = tick(&cfg, &sweep_spks, &mut db, &chain, &mut journal).await {
+		if let Err(e) = tick(&cfg, &sweep_spks, &mut db, &chain, &mut journal, &mut captaind).await {
 			if e.downcast_ref::<InvariantViolation>().is_some() { return Err(e) }
 			warn!("tick failed, retrying: {e:#}");
 		}
-		db::check_invariants(&db).await?;
 		if once { return Ok(()) }
 		tokio::time::sleep(Duration::from_secs(cfg.poll_interval_secs)).await;
 	}
 }
 
-/// One pass. Infrastructure errors (DB, bitcoind) abort the tick and are
-/// retried next tick; problems with a single coin quarantine that coin only.
-async fn tick(
-	cfg: &Config, sweep_spks: &[ScriptBuf], db: &mut tokio_postgres::Client, chain: &chain::Chain,
-	journal: &mut journal::Journal,
+/// Close the local signed-before-journal window and reattach journaled batches.
+async fn reconcile_local(
+	db: &mut tokio_postgres::Client, journal: &mut journal::Journal,
 ) -> anyhow::Result<()> {
-	// Every tick: captaind may be upgraded under us.
-	let ver = db::captaind_schema_version(db).await?;
-	if !cfg.postgres.allowed_schema_versions.contains(&ver) {
-		return Err(InvariantViolation(format!("captaind schema version {ver} not in allowed_schema_versions")).into());
-	}
-	chain.check_wallet().await?;
-	let tip = chain.tip().await?;
-
-	// Journal first: any ledger row with a txid must be journaled (closes the
-	// crash window between storing a tx and journaling it), and any journaled
-	// coin that is live again in captaind (DB restore) is re-marked spent
-	// before a user can refresh it. Scans the whole journal every tick.
 	let mut unjournaled: BTreeMap<String, Vec<String>> = BTreeMap::new();
 	for (id, txid, confirmed) in db::paid_ids(db).await? {
 		if confirmed { journal.mark_confirmed(&txid); }
@@ -106,11 +116,6 @@ async fn tick(
 	for (txid, ids) in unjournaled {
 		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
 	}
-	for id in db::resurrected(db, &journal.ids()).await? {
-		let flipped = db::reassert_paid(db, &id).await?;
-		warn!(vtxo = %id, flipped, "journaled coin live again in captaind (restore?); re-marked spent");
-		db::quarantine(db, &id, "payout committed in local journal").await?;
-	}
 	// A backup taken after a claim but before signing still has its row.
 	// Reattach its journaled transaction instead of building another payment.
 	for claim in db::claimed_payouts(db).await? {
@@ -118,8 +123,59 @@ async fn tick(
 			db::mark_signed(db, &[claim.vtxo_id], &txid, &raw).await?;
 		}
 	}
+	Ok(())
+}
 
+async fn store_claim(
+	cfg: &Config, db: &tokio_postgres::Client, claim: &captaind::Candidate,
+) -> anyhow::Result<()> {
+	let vtxo: Vtxo = Vtxo::deserialize(&claim.vtxo)?;
+	let key = vtxo.user_pubkey().x_only_public_key().0;
+	let address = Address::p2tr(&Secp256k1::verification_only(), key, None, cfg.network).to_string();
+	db::store_claim(db, &claim.vtxo_id, &vtxo.chain_anchor().to_string(), vtxo.amount().to_sat(), &address).await
+}
+
+/// Receipts are permanent; restart each scan so an older delayed claim cannot
+/// commit behind a persisted cursor. Unknown receipts become local obligations.
+async fn reconcile_claims(
+	cfg: &Config, db: &tokio_postgres::Client, journal: &journal::Journal,
+	captaind: &mut captaind::Captaind,
+) -> anyhow::Result<()> {
+	let known = db::payout_ids(db).await?;
+	let mut missing = known.iter().cloned().chain(journal.ids()).collect::<BTreeSet<_>>();
+	let mut cursor = (0, String::new());
+	loop {
+		let page = captaind.page(true, 0, 0, &cursor, 256).await?;
+		let Some(last) = page.last() else { break; };
+		cursor = (last.expiry, last.vtxo_id.clone());
+		for receipt in page {
+			missing.remove(&receipt.vtxo_id);
+			if !known.contains(&receipt.vtxo_id) {
+				let (status, claim) = captaind.claim(&receipt.vtxo_id, cfg.policy.grace_blocks).await?;
+				anyhow::ensure!(status == captaind::Status::Claimed, "receipt disappeared for {}", receipt.vtxo_id);
+				store_claim(cfg, db, &claim.ok_or_else(|| anyhow::anyhow!("receipt omitted VTXO"))?).await?;
+			}
+		}
+	}
+	if let Some(id) = missing.first() {
+		return Err(InvariantViolation(format!("captaind lacks {} local settlement(s), including {id}; restore with settlement_replay_ids before starting workers", missing.len())).into());
+	}
+	Ok(())
+}
+
+/// One pass. Infrastructure errors (DB, bitcoind) abort the tick and are
+/// retried next tick; problems with a single coin quarantine that coin only.
+async fn tick(
+	cfg: &Config, sweep_spks: &[ScriptBuf], db: &mut tokio_postgres::Client, chain: &chain::Chain,
+	journal: &mut journal::Journal, captaind: &mut captaind::Captaind,
+) -> anyhow::Result<()> {
+	chain.check_wallet().await?;
+
+	// Durable signed retries do not depend on captaind being available.
+	reconcile_local(db, journal).await?;
 	settle_inflight(db, chain, journal).await?;
+	reconcile_claims(cfg, db, journal, captaind).await?;
+	reconcile_local(db, journal).await?;
 
 	// Fee gate: bitcoind's real estimate only, no fallback rate, ever. No
 	// estimate: no new claims or transactions. Stored payouts were retried above.
@@ -142,19 +198,20 @@ async fn tick(
 	let min_amount = p.min_payout_sat.max(checks::min_affordable(share, p.max_fee_pct_per_payout));
 	// Page past waiting coins as well as fee-filtered ones. Keep each query
 	// bounded without allowing its oldest waiting rows to starve later coins.
-	let mut cursor = (i32::MIN, String::new());
+	let mut cursor = (0, String::new());
 	while claims_left > 0 {
-		let page = db::candidates(db, tip, p.grace_blocks, p.max_batch, min_amount, &cursor).await?;
+		let page = captaind.page(false, p.grace_blocks, min_amount, &cursor, (p.max_batch as u32 * 20).min(256)).await?;
 		let Some(last) = page.last() else { break; };
 		cursor = (last.expiry, last.vtxo_id.clone());
+		let ids = page.iter().map(|c| c.vtxo_id.clone()).collect::<Vec<_>>();
+		let excluded = db::excluded(db, &ids).await?;
 		for c in page {
 			if claims_left <= 0 { break }
-			if journal.contains(&c.vtxo_id) { continue } // handled above
-			let reason = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
+			if excluded.contains(&c.vtxo_id) || journal.contains(&c.vtxo_id) { continue }
+			let reason = match process_coin(cfg, sweep_spks, db, chain, captaind, fee_rate, &c).await? {
 				Outcome::Quarantine(reason) => reason,
 				Outcome::Claimed => { claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed"); continue },
 				Outcome::Lost => { info!(vtxo = %c.vtxo_id, "user redeemed first; skipped"); continue },
-				Outcome::Banned => { claims_left -= 1; info!(vtxo = %c.vtxo_id, "banned; waiting before claim"); continue },
 				Outcome::Wait(why) => { tracing::debug!(vtxo = %c.vtxo_id, why, "waiting"); continue },
 			};
 			quarantined += 1;
@@ -173,7 +230,7 @@ async fn tick(
 
 async fn process_coin(
 	cfg: &Config, sweep_spks: &[ScriptBuf], db: &mut tokio_postgres::Client, chain: &chain::Chain,
-	tip: u32, fee_rate: f64, c: &db::Candidate,
+	captaind: &mut captaind::Captaind, fee_rate: f64, c: &captaind::Candidate,
 ) -> anyhow::Result<Outcome> {
 	let p = &cfg.policy;
 
@@ -184,8 +241,7 @@ async fn process_coin(
 	};
 	let anchor = vtxo.chain_anchor();
 	let amount = vtxo.amount().to_sat();
-	// Not worth paying on-chain at today's fee: leave it alone (no ban, no
-	// claim), so its owner can still refresh it. Re-checked every tick.
+	// Leave unaffordable coins unclaimed so their owner can still refresh them.
 	if !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
 		return Ok(Outcome::Wait("fee share above max_fee_pct_per_payout"));
 	}
@@ -197,11 +253,12 @@ async fn process_coin(
 	// Only this coin's output at each level belongs to its exit path. A
 	// swept sibling, even in the same transaction, cannot settle this coin.
 	let path = std::iter::once(anchor).chain(vtxo.transactions()
-		.map(|t| OutPoint::new(t.tx.compute_txid(), t.output_idx as u32)));
+		.map(|t| OutPoint::new(t.tx.compute_txid(), t.output_idx as u32))).collect::<Vec<_>>();
 	let mut swept = false;
-	for outpoint in path {
+	let hints = captaind.spenders(&path).await?;
+	for (outpoint, spender) in path.into_iter().zip(hints) {
 		if outpoint != anchor && chain.is_unspent(outpoint).await? { break; }
-		let Some(spender) = db::recorded_spender(db, &outpoint.to_string()).await? else { continue; };
+		let Some(spender) = spender else { continue; };
 		let Ok(spender_txid) = Txid::from_str(&spender) else {
 			return Ok(Outcome::Quarantine(format!("unparseable spender txid {spender:?}")));
 		};
@@ -220,29 +277,15 @@ async fn process_coin(
 	}
 	if !swept { return Ok(Outcome::Wait("no confirmed sweep on this coin's exit path")) }
 
-	// Nothing in flight may hold the coin.
-	if db::in_round_participation(db, &c.vtxo_id).await? { return Ok(Outcome::Wait("in a round participation")) }
-
-	// Ban via captaind's own column, then wait (liveness only).
-	match db::ban_age_secs(db, &c.vtxo_id, tip).await? {
-		None => {
-			let until = tip.checked_add(p.ban_blocks).ok_or_else(|| anyhow::anyhow!("ban overflow"))?;
-			db::ban(db, &c.vtxo_id, until).await?;
-			return Ok(Outcome::Banned);
+	match captaind.claim(&c.vtxo_id, p.grace_blocks).await? {
+		(captaind::Status::Claimed, Some(claim)) => {
+			store_claim(cfg, db, &claim).await?;
+			Ok(Outcome::Claimed)
 		},
-		Some(age) if age < p.ban_wait_secs as f64 => return Ok(Outcome::Wait("ban wait")),
-		Some(_) => {},
+		(captaind::Status::Busy, _) => Ok(Outcome::Wait("captaind operation holds the coin")),
+		(captaind::Status::Ineligible, _) => Ok(Outcome::Lost),
+		_ => anyhow::bail!("captaind claim omitted the VTXO"),
 	}
-	if db::in_round_participation(db, &c.vtxo_id).await? { return Ok(Outcome::Wait("in a round participation")) }
-
-	// The atomic claim. The payout goes to BIP86 tr(coin key), key path only.
-	let key = vtxo.user_pubkey().x_only_public_key().0;
-	let address = Address::p2tr(&Secp256k1::verification_only(), key, None, cfg.network).to_string();
-	Ok(if db::claim(db, &c.vtxo_id, &anchor.to_string(), amount, &address, tip).await? {
-		Outcome::Claimed
-	} else {
-		Outcome::Lost
-	})
 }
 
 /// Pay one affordable batch, leaving deferred claims for a later tick.

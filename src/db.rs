@@ -1,17 +1,9 @@
-//! Postgres access. Reads captaind's tables; writes only the guarded claim,
-//! the ban column, and the `sidecar` schema.
+//! The sidecar's independent ledger. Captaind state is accessed through its RPC.
 
+use std::collections::HashSet;
 use tokio_postgres::{Client, NoTls};
 
-/// Advisory-lock key: only one sidecar instance may run against a database.
-const LEADER_LOCK: i64 = 0x41_42_41_4e_44_4f_4e; // "ABANDON"
-
-/// A row from captaind's `vtxo` table.
-pub struct Candidate {
-	pub vtxo_id: String,
-	pub vtxo: Vec<u8>,
-	pub expiry: i32,
-}
+const LEADER_LOCK: i64 = 0x41_42_41_4e_44_4f_4e;
 
 pub struct Payout {
 	pub vtxo_id: String,
@@ -34,107 +26,12 @@ pub async fn try_lead(db: &Client) -> anyhow::Result<bool> {
 	Ok(db.query_one("SELECT pg_try_advisory_lock($1) AS ok", &[&LEADER_LOCK]).await?.try_get("ok")?)
 }
 
-/// captaind's latest applied refinery migration version.
-pub async fn captaind_schema_version(db: &Client) -> anyhow::Result<i32> {
-	Ok(db.query_one("SELECT MAX(version) AS v FROM refinery_schema_history", &[]).await?.try_get("v")?)
-}
-
-/// The sidecar does not create its tables: `migrations/0001_sidecar.sql`
-/// is applied once at setup (docs/deployment.md).
 pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
-	for t in ["sidecar.ban", "sidecar.quarantine", "sidecar.payout"] {
+	for t in ["sidecar.quarantine", "sidecar.payout"] {
 		let ok: bool = db.query_one("SELECT to_regclass($1) IS NOT NULL AS ok", &[&t]).await?.try_get("ok")?;
 		anyhow::ensure!(ok, "table {t} missing: apply migrations/0001_sidecar.sql");
 	}
 	Ok(())
-}
-
-/// Expired, unpaid, unquarantined, spendable user coins past the grace period,
-/// of at least `min_amount` (filtered before the limit, so coins too small to
-/// pay never fill the window).
-pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64, after: &(i32, String)) -> anyhow::Result<Vec<Candidate>> {
-	let rows = db.query("
-		SELECT v.vtxo_id, v.vtxo, v.expiry
-		FROM vtxo v
-		WHERE v.policy_type = 'pubkey'
-		  -- 'unclaimed' = a delegated refresh output whose owner never came back
-		  AND v.spend_state IN ('spendable', 'unclaimed')
-		  AND v.confirmed_height IS NULL
-		  AND v.expiry::bigint + $1::bigint <= $2::bigint
-		  AND v.amount >= $4::bigint
-		  AND NOT EXISTS (SELECT 1 FROM sidecar.payout p WHERE p.vtxo_id = v.vtxo_id)
-		  AND NOT EXISTS (SELECT 1 FROM sidecar.quarantine q WHERE q.vtxo_id = v.vtxo_id)
-		  AND (v.expiry, v.vtxo_id) > ($5, $6)
-		ORDER BY v.expiry, v.vtxo_id
-		LIMIT $3::bigint * 20
-	", &[&(grace as i64), &(tip as i64), &limit, &(min_amount as i64), &after.0, &after.1]).await?;
-	rows.into_iter()
-		.map(|r| Ok(Candidate {
-			vtxo_id: r.try_get("vtxo_id")?,
-			vtxo: r.try_get("vtxo")?,
-			expiry: r.try_get("expiry")?,
-		}))
-		.collect()
-}
-
-/// The txid captaind recorded as spending an outpoint, if any. Only a hint:
-/// the caller verifies it on-chain.
-pub async fn recorded_spender(db: &Client, outpoint: &str) -> anyhow::Result<Option<String>> {
-	let row = db.query_opt("SELECT onchain_spent_txid FROM vtxo WHERE vtxo_id = $1", &[&outpoint]).await?;
-	Ok(row.and_then(|r| r.get::<_, Option<String>>("onchain_spent_txid")))
-}
-
-/// Any round participation still referencing the coin.
-pub async fn in_round_participation(db: &Client, vtxo_id: &str) -> anyhow::Result<bool> {
-	Ok(db.query_one("
-		SELECT EXISTS (
-			SELECT 1 FROM round_part_input i
-			JOIN round_participation p ON p.id = i.participation_id
-			WHERE i.vtxo_id = $1 AND p.forfeited_at IS NULL
-		) AS e
-	", &[&vtxo_id]).await?.try_get::<_, bool>("e")?)
-}
-
-/// Seconds since the sidecar's ban on this coin started, or None if the coin
-/// is not under *our* ban: never banned, unbanned by an operator, re-banned
-/// with another height, or lapsed. Any of those restarts the wait.
-pub async fn ban_age_secs(db: &Client, vtxo_id: &str, tip: u32) -> anyhow::Result<Option<f64>> {
-	let row = db.query_opt("
-		SELECT EXTRACT(EPOCH FROM (NOW() - b.banned_at))::float8 AS age
-		FROM sidecar.ban b JOIN vtxo v ON v.vtxo_id = b.vtxo_id
-		WHERE b.vtxo_id = $1 AND v.banned_until_height = b.until_height AND b.until_height > $2
-	", &[&vtxo_id, &(tip as i32)]).await?;
-	Ok(match row { Some(r) => Some(r.try_get::<_, f64>("age")?), None => None })
-}
-
-/// Ban by writing captaind's own column, exactly as its admin `BanVtxo` does
-/// (`server/src/database/ban.rs`). `until` must fit in i32 (captaind stores
-/// it `as i32`; larger values wrap and break reads).
-pub async fn ban(db: &mut Client, vtxo_id: &str, until: u32) -> anyhow::Result<()> {
-	let until = i32::try_from(until).map_err(|_| anyhow::anyhow!("ban height {until} overflows i32"))?;
-	let tx = db.transaction().await?;
-	tx.execute("
-		UPDATE vtxo SET banned_until_height = $2, updated_at = NOW()
-		WHERE vtxo_id = $1 AND spend_state IN ('spendable', 'unclaimed')
-		  -- never shorten a longer ban set by an operator
-		  AND (banned_until_height IS NULL OR banned_until_height < $2)
-	", &[&vtxo_id, &until]).await?;
-	tx.execute("
-		INSERT INTO sidecar.ban (vtxo_id, until_height) VALUES ($1, $2)
-		ON CONFLICT (vtxo_id) DO UPDATE SET until_height = $2, banned_at = NOW()
-	", &[&vtxo_id, &until]).await?;
-	tx.commit().await?;
-	Ok(())
-}
-
-/// Re-assert a journaled payout after a DB restore: flip the coin back to
-/// spent (only if it is spendable), so captaind does not honour it in Ark too.
-pub async fn reassert_paid(db: &Client, vtxo_id: &str) -> anyhow::Result<bool> {
-	let n = db.execute("
-		UPDATE vtxo SET spend_state = 'spent', updated_at = NOW()
-		WHERE vtxo_id = $1 AND policy_type = 'pubkey' AND spend_state IN ('spendable', 'unclaimed')
-	", &[&vtxo_id]).await?;
-	Ok(n == 1)
 }
 
 pub async fn quarantine(db: &Client, vtxo_id: &str, reason: &str) -> anyhow::Result<()> {
@@ -145,31 +42,26 @@ pub async fn quarantine(db: &Client, vtxo_id: &str, reason: &str) -> anyhow::Res
 	Ok(())
 }
 
-/// The atomic claim: flip the coin to spent iff it is still spendable and
-/// our ban is intact (the race with the user), and record the payout, in one
-/// transaction. False if the user redeemed it first.
-pub async fn claim(
-	db: &mut Client, vtxo_id: &str, anchor_point: &str, amount_sat: u64, address: &str, tip: u32,
-) -> anyhow::Result<bool> {
-	let tx = db.transaction().await?;
-	let n = tx.execute("
-		UPDATE vtxo SET spend_state = 'spent', updated_at = NOW()
-		WHERE vtxo_id = $1 AND policy_type = 'pubkey'
-		  AND spend_state IN ('spendable', 'unclaimed') AND confirmed_height IS NULL
-		  -- our ban must still be exactly in place (not lifted by an operator)
-		  AND banned_until_height > $2
-		  AND banned_until_height = (SELECT until_height FROM sidecar.ban WHERE vtxo_id = $1)
-	", &[&vtxo_id, &(tip as i32)]).await?;
-	if n != 1 {
-		tx.rollback().await?;
-		return Ok(false);
-	}
-	tx.execute("
-		INSERT INTO sidecar.payout (vtxo_id, anchor_point, amount_sat, address, state)
-		VALUES ($1, $2, $3, $4, 'claimed')
-	", &[&vtxo_id, &anchor_point, &(amount_sat as i64), &address]).await?;
-	tx.commit().await?;
-	Ok(true)
+/// Store an already committed captaind handoff. A failed insert is recovered
+/// from captaind's permanent receipt; an existing local row keeps its state.
+pub async fn store_claim(
+	db: &Client, id: &str, anchor: &str, amount: u64, address: &str,
+) -> anyhow::Result<()> {
+	db.execute("INSERT INTO sidecar.payout (vtxo_id, anchor_point, amount_sat, address, state)
+		VALUES ($1, $2, $3, $4, 'claimed') ON CONFLICT DO NOTHING",
+		&[&id, &anchor, &(amount as i64), &address]).await?;
+	Ok(())
+}
+
+pub async fn payout_ids(db: &Client) -> anyhow::Result<HashSet<String>> {
+	Ok(db.query("SELECT vtxo_id FROM sidecar.payout", &[]).await?
+		.into_iter().map(|r| r.get(0)).collect())
+}
+
+pub async fn excluded(db: &Client, ids: &[String]) -> anyhow::Result<HashSet<String>> {
+	Ok(db.query("SELECT vtxo_id FROM sidecar.payout WHERE vtxo_id = ANY($1)
+		UNION SELECT vtxo_id FROM sidecar.quarantine WHERE vtxo_id = ANY($1)", &[&ids]).await?
+		.into_iter().map(|r| r.get(0)).collect())
 }
 
 /// Every coin id in the ledger with its txid (for journal reconciliation).
@@ -181,14 +73,6 @@ pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, bool)>
 
 pub async fn raw_tx(db: &Client, txid: &str) -> anyhow::Result<Vec<u8>> {
 	Ok(db.query_one("SELECT raw_tx FROM sidecar.payout WHERE txid = $1 LIMIT 1", &[&txid]).await?.try_get("raw_tx")?)
-}
-
-/// Journaled coins that are spendable/unclaimed again in captaind (DB restore).
-pub async fn resurrected(db: &Client, ids: &[String]) -> anyhow::Result<Vec<String>> {
-	db.query(
-		"SELECT vtxo_id FROM vtxo WHERE vtxo_id = ANY($1) AND spend_state IN ('spendable','unclaimed')",
-		&[&ids],
-	).await?.into_iter().map(|r| Ok(r.try_get("vtxo_id")?)).collect()
 }
 
 pub async fn claimed_payouts(db: &Client) -> anyhow::Result<Vec<Payout>> {
@@ -220,24 +104,5 @@ pub async fn set_state_by_txid(db: &Client, txid: &str, to: &str) -> anyhow::Res
 		"UPDATE sidecar.payout SET state = $2, updated_at = NOW() WHERE txid = $1 AND state IN ('signed','broadcast')",
 		&[&txid, &to],
 	).await?;
-	Ok(())
-}
-
-/// Every paid coin is spent, with no round/arkoor/offboard spend recorded.
-pub async fn check_invariants(db: &Client) -> anyhow::Result<()> {
-	let bad: i64 = db.query_one("
-		SELECT COUNT(*) AS n FROM sidecar.payout p
-		JOIN vtxo v ON v.vtxo_id = p.vtxo_id
-		WHERE v.spend_state <> 'spent'
-		   OR v.spent_in_round IS NOT NULL
-		   OR v.oor_spent_txid IS NOT NULL
-		   OR v.offboarded_in IS NOT NULL
-	", &[]).await?.try_get("n")?;
-	anyhow::ensure!(bad == 0, "invariant violated for {bad} payout row(s)");
-	let orphans: i64 = db.query_one(
-		"SELECT COUNT(*) AS n FROM sidecar.payout p WHERE NOT EXISTS (SELECT 1 FROM vtxo v WHERE v.vtxo_id = p.vtxo_id)",
-		&[],
-	).await?.try_get("n")?;
-	anyhow::ensure!(orphans == 0, "invariant violated: {orphans} paid coin row(s) deleted from vtxo");
 	Ok(())
 }

@@ -1,16 +1,7 @@
--- Sidecar state, in captaind's Postgres under its own schema, so a claim
--- (the vtxo UPDATE) and its ledger row commit in one transaction.
--- The `sidecar` schema is created first (docs/deployment.md).
+-- Apply to the sidecar's independent state database.
+CREATE SCHEMA IF NOT EXISTS sidecar;
 
--- Coins banned by the sidecar while waiting for in-flight operations to clear.
-CREATE TABLE IF NOT EXISTS sidecar.ban (
-	vtxo_id       TEXT PRIMARY KEY,
-	until_height  INTEGER NOT NULL,   -- the banned_until_height we wrote
-	banned_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Coins the sidecar will not touch automatically (undecodable, partial
--- unroll, already paid per the journal). Cleared only by a human.
+-- Validation failures retained for manual release.
 CREATE TABLE IF NOT EXISTS sidecar.quarantine (
 	vtxo_id    TEXT PRIMARY KEY,
 	reason     TEXT NOT NULL,

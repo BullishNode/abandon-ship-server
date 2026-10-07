@@ -1,13 +1,12 @@
 # Copy to config.toml (git-ignored). Values below are regtest examples.
 network = "regtest"
 journal_path = "/var/lib/abandon-ship/payouts.journal"  # local disk, back up separately
+captaind_url = "http://127.0.0.1:3536" # existing private admin listener
 poll_interval_secs = 10   # seconds between ticks
 
 [postgres]
-# captaind's database, with captaind's DB role.
-conninfo = "host=127.0.0.1 port=5432 user=postgres password=<secret> dbname=bark-server"
-# captaind schema versions (refinery) the upgrade gate has signed off.
-allowed_schema_versions = [0]
+# The sidecar's independent state database.
+conninfo = "host=127.0.0.1 port=5432 user=postgres password=<secret> dbname=abandon-ship"
 
 [bitcoind]
 # Dedicated payout wallet, with the node's RPC credentials.
@@ -21,8 +20,6 @@ pass = "<rpcpassword>"
 sweep_addresses = ["bcrt1q..."]
 grace_blocks = 1008          # blocks after expiry before a payout (7 days)
 sweep_min_confs = 100        # depth of the wholesale sweep
-ban_blocks = 6               # short: covers the wait + claim; never shortens an operator ban
-ban_wait_secs = 120          # >= round interval + offboard_session_timeout
 max_batch = 100              # claims per tick (and coins per payout tx)
 payout_conf_target = 6       # estimatesmartfee target; no estimate, no payout
 max_fee_pct_per_payout = 20  # pay on-chain only if the fee share <= 20% of the coin

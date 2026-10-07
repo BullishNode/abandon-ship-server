@@ -6,8 +6,9 @@ description = "Sidecar for captaind: pays expired, unrefreshed Ark coins on-chai
 license = "MIT"
 
 [dependencies]
-# Pinned to the captaind commit we target (bark master 6768e0fb4 = nightly-2026-10-01 images; lib/server identical to 8c29e300c).
-ark-lib = { git = "https://gitlab.com/ark-bitcoin/bark.git", rev = "6768e0fb4f4f58bbacd0efafc979a119c58f3311" }
+# This comparison branch uses the matching local captaind patch.
+ark-lib = { path = "../abandon-ship-bark-captaind-api/lib" }
+bark-server-rpc = { path = "../abandon-ship-bark-captaind-api/server-rpc", default-features = false, features = ["tonic-native"] }
 bitcoin = "0.32.7"
 bitcoincore-rpc = "0.19"
 
