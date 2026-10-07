@@ -1,0 +1,109 @@
+# One stack for signet and mainnet; run it through ./dc <signet|mainnet>.
+# Same images as regtest/compose.yaml (captaind/watchmand nightly-2026-10-01 = bark 6768e0fb4).
+# Every port binds to localhost; reach captaind through an SSH tunnel until TLS is in front of it.
+
+services:
+  bitcoind:
+    restart: unless-stopped
+    image: bitcoin/bitcoin@sha256:a1d05be6939b5c85132a761d2b795f5b8a2612ce53782263da4939778e461792  # Core 31.0
+    command: [bitcoind, "${BITCOIND_NET}", -server, -printtoconsole, -rpcport=8332, -rpcbind=0.0.0.0, -rpcallowip=172.16.0.0/12, "-rpcuser=${RPC_USER}", "-rpcpassword=${RPC_PASS}", -txindex, -blockfilterindex, -coinstatsindex, "-dbcache=${BITCOIND_DBCACHE}"]
+    volumes: ["bitcoin:/home/bitcoin/.bitcoin"]
+    healthcheck:
+      test: [CMD-SHELL, "bitcoin-cli ${BITCOIND_NET} -rpcport=8332 -rpcuser=${RPC_USER} -rpcpassword=${RPC_PASS} getblockchaininfo >/dev/null"]
+      interval: 10s
+      retries: 60
+
+  postgres:
+    restart: unless-stopped
+    image: postgres@sha256:da788743d2060767375896de4d646f7576f5911461444b372616f19ea61db2ec
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PG_PASS}
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres"]
+      interval: 5s
+      retries: 30
+
+  cln:
+    restart: unless-stopped
+    image: secondark/cln-hold@sha256:d39a7befb75611a76002a5c2e75c8d9d3be9796c68d0bb1148de98f1dbe7add1
+    hostname: cln
+    environment:
+      NETWORK: ${CLN_NETWORK}
+      BITCOIN_RPCCONNECT: bitcoind:8332
+      BITCOIN_RPCUSER: ${RPC_USER}
+      BITCOIN_RPCPASSWORD: ${RPC_PASS}
+      CLN_ALIAS: abandon-${STACK}
+      CLN_LOG_LEVEL: info
+    entrypoint: [/bin/sh, -c, "mkdir -p /root/.lightning/${CLN_DIR} && exec /root/cln/start.sh"]
+    volumes: ["cln:/root/.lightning"]
+    depends_on:
+      bitcoind: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "lightning-cli --network=${CLN_DIR} getinfo >/dev/null && test -f /root/.lightning/${CLN_DIR}/generation.done"]
+      interval: 10s
+      retries: 60
+
+  captaind:
+    restart: unless-stopped
+    image: secondark/captaind@sha256:9414f43b7de5ce4a806380d6ece719f73c8c1167ad2f40ccbd0ba6e30789c292
+    environment:
+      CAPTAIND_LOG: info
+    entrypoint: [/bin/sh, /scripts/start-captaind.sh]
+    volumes:
+      - captaind:/data/captaind
+      - cln:/data/cln:ro
+      - ./state/${STACK}/captaind.toml:/config/captaind.toml:ro
+      - ./scripts:/scripts:ro
+    ports: ["127.0.0.1:3535:3535"]
+    depends_on:
+      bitcoind: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      cln: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "captaind --config /config/captaind.toml rpc wallet >/dev/null"]
+      interval: 10s
+      retries: 60
+
+  watchmand:
+    restart: unless-stopped
+    image: secondark/captaind@sha256:9414f43b7de5ce4a806380d6ece719f73c8c1167ad2f40ccbd0ba6e30789c292
+    environment:
+      WATCHMAND_LOG: info
+    entrypoint: [/bin/sh, /scripts/start-watchmand.sh]
+    volumes:
+      - captaind:/data/captaind:ro
+      - watchmand:/data/watchmand
+      - ./state/${STACK}/watchmand.toml:/config/watchmand.toml:ro
+      - ./scripts:/scripts:ro
+    depends_on:
+      captaind: {condition: service_healthy}
+
+  sidecar:
+    restart: unless-stopped
+    build: {context: .., dockerfile: deploy/sidecar.Dockerfile}
+    image: abandon-ship/sidecar:local
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./state/${STACK}/sidecar.toml:/config/sidecar.toml:ro
+      - ./state/${STACK}/journal:/journal
+    depends_on:
+      captaind: {condition: service_healthy}
+    profiles: [sidecar]
+
+  # Bark CLI wallets: ./dc <stack> run --rm bark --datadir /wallets/<name> <cmd>
+  bark:
+    image: secondark/bark@sha256:eb056e4cf3f2e92f1166573befdadf2ff9430b2fb18acd14e73058e08c768ec4
+    entrypoint: [bark]
+    volumes: ["wallets:/wallets"]
+    profiles: [cli]
+
+volumes:
+  bitcoin:
+  postgres:
+  cln:
+  captaind:
+  watchmand:
+  wallets:

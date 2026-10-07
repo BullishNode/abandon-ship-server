@@ -1,0 +1,25 @@
+# sidecar config rendered by deploy/render.sh.
+network = "${NETWORK}"
+journal_path = "/journal/payouts.journal"
+poll_interval_secs = 10
+
+[postgres]
+conninfo = "host=postgres port=5432 user=postgres password=${PG_PASS} dbname=bark-server-db"
+allowed_schema_versions = [67]
+
+[bitcoind]
+url = "http://bitcoind:8332/wallet/payout"
+user = "${RPC_USER}"
+pass = "${RPC_PASS}"
+
+[policy]
+ban_blocks = ${BAN_BLOCKS}
+ban_wait_secs = ${BAN_WAIT_SECS}
+sweep_addresses = ["${SWEEP_ADDRESS}"]
+grace_blocks = ${GRACE_BLOCKS}
+sweep_min_confs = ${SWEEP_MIN_CONFS}
+max_batch = 100
+payout_conf_target = 6
+max_fee_pct_per_payout = ${MAX_FEE_PCT}
+max_quarantine_per_tick = 10
+min_payout_sat = ${MIN_PAYOUT_SAT}
