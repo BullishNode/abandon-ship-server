@@ -1,0 +1,63 @@
+Comparison settlement oracle — 2026-10-07
+
+Example build (cargo build --locked --example vtxo_facts): PASS.
+Six synthetic oracle sensitivity checks: PASS, 0 FAIL. These are not Bitcoin-node integration tests.
+
+Saved actual abandon-verify transactions and independently decoded coin data:
+  oracle-unclaimed-before: expected FAIL / actual exit1 at settled predecessor and replacement.
+  oracle-unclaimed-after: PASS / exit0; original exit only, replacement unpaid.
+  oracle-delegated-positive: PASS / exit0; fee equality and exact recipient output checked.
+
+Declared lineage and Bitcoin transaction facts are separate from the sidecar payout count. Only declared ancestry is checked. No capital-conservation or pending-recovery claim. The positive shared-key live receipt scenario is separate.
+
+20261007T232520-e77d281e oracle-unclaimed-before: actual exit1, expected1, 0.157s
+Traceback (most recent call last):
+  File "/home/francis/abandon-ship-server-main/tests/comparison/oracle.py", line 117, in <module>
+    main()
+  File "/home/francis/abandon-ship-server-main/tests/comparison/oracle.py", line 113, in main
+    print(json.dumps(verify(evidence), indent=2))
+                     ^^^^^^^^^^^^^^^^
+  File "/home/francis/abandon-ship-server-main/tests/comparison/oracle.py", line 53, in verify
+    assert not overlap, f"settled predecessor and replacement: {sorted(overlap)} -> {coin}"
+           ^^^^^^^^^^^
+AssertionError: settled predecessor and replacement: ['3ed5c45bd12b4fcca0e6aa00606e83d05220f2f6ad712189d5e698872e7047c2:0'] -> 4deb5699204a97b52bd827995c1db9cc0eb8ac63c7e033f43abb8d5eff429757:0
+
+20261007T232521-43b86c1c oracle-unclaimed-after: actual exit0, expected0, 0.064s
+{
+  "settled_coins": 1,
+  "payouts": 0,
+  "mining_fees_sat": {},
+  "checks": [
+    "settlement identity",
+    "predecessor exclusion"
+  ]
+}
+
+20261007T232521-e8364d87 oracle-delegated-positive: actual exit0, expected0, 0.058s
+{
+  "settled_coins": 1,
+  "payouts": 1,
+  "mining_fees_sat": {
+    "890ab2338c6f29f3e52e64d762dfc5cc55819294309f06234ff2fc6958f90151": 726
+  },
+  "checks": [
+    "settlement identity",
+    "predecessor exclusion",
+    "recipient outputs",
+    "actual fee equality and cap"
+  ]
+}
+
+20261007T233115-a73e8ba4 oracle-sensitivity: actual exit0, expected0, 0.201s
+test_distinct_payments_for_one_coin (test_oracle.OracleSensitivity.test_distinct_payments_for_one_coin) ... ok
+test_exit_of_predecessor_and_payout_of_successor (test_oracle.OracleSensitivity.test_exit_of_predecessor_and_payout_of_successor) ... ok
+test_operator_subsidy (test_oracle.OracleSensitivity.test_operator_subsidy) ... ok
+test_recipient_overcharge (test_oracle.OracleSensitivity.test_recipient_overcharge) ... ok
+test_split_and_shared_key_are_not_duplicate_settlement (test_oracle.OracleSensitivity.test_split_and_shared_key_are_not_duplicate_settlement) ... ok
+test_wrong_key (test_oracle.OracleSensitivity.test_wrong_key) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.002s
+
+OK
+
