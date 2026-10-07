@@ -56,9 +56,13 @@ Cutover is a stopped-writer operation, not a rolling mixed deployment:
 4. Start patched captaind, then watchmand and one adapter. Check replay count,
    reconciliation and original transaction IDs before opening normal operation.
 
-The experiment tests database restore/import and payout recovery, but does not
-execute migration from a live direct-database installation. Do not alternate
-implementations after cutover without another stopped-state reconciliation.
+The isolated cutover rehearsal uses stock captaind and actual direct-DB claims
+in claimed, signed, broadcast and confirmed states. Killing the startup import
+at an observed row lock rolls back its receipts before the listener opens.
+Retry preserves the original signed bytes, refuses refresh and settles the
+remaining obligation. Repeating the export is idempotent. Do not alternate
+implementations after cutover without another stopped-state reconciliation;
+rollback to a stale captaind backup is not supported by this procedure.
 
 ## Fees and receipts
 
