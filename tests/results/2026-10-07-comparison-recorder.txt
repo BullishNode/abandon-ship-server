@@ -1,0 +1,14 @@
+Observation recorder checks — 2026-10-07
+
+4 PASS / 0 FAIL: successful command exit0; expected failing command exit7;
+unexpected failing command exit9; missing executable exit127/setup_failed.
+Each run retained a unique manifest and output log plus start/finish events.
+The expected-negative command still returned7 and was recorded as actual7;
+matching an expectation did not relabel the scenario as successful.
+This validates evidence capture only, not any payment/settlement behavior.
+
+Raw private evidence: session2-continuation/2026-10-07/comparison-recorder-check/
+Files: observations.jsonl, OBSERVATIONS.md and four per-run directories.
+Combined comparison observations: session2-continuation/observations/.
+No Rust changes in this increment; most recent cargo10PASS/buildPASS from the
+immediately preceding recovery integration. Python AST/diff checks PASS.
