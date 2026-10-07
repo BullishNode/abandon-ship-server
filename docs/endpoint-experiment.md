@@ -41,6 +41,8 @@ An omitted or stale export is not automatically detected before startup.
 
 Then start watchmand and the sidecar. Remote receipts recreate missing local
 rows; the independent journal reattaches their original signed transactions.
+Confirmation skips a journaled batch only when every member has a confirmed
+local row; a failed import can therefore retry after other members confirm.
 Never discard the journal or start a second payout ledger to bypass an error.
 
 ## Existing direct-database installation

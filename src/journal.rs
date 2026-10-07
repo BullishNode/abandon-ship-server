@@ -52,6 +52,16 @@ impl Journal {
 
 	pub fn mark_confirmed(&mut self, txid: &str) { self.confirmed.insert(txid.to_owned()); }
 
+	/// A chain-confirmed batch still needs reconciliation if a restore lost one
+	/// of its ledger rows. Clear earlier tick hints until every member is recorded.
+	pub fn reconcile_confirmed(&mut self, ids: &HashSet<String>) {
+		self.confirmed.clear();
+		self.confirmed.extend(self.paid.values().cloned());
+		for (id, txid) in &self.paid {
+			if !ids.contains(id) { self.confirmed.remove(txid); }
+		}
+	}
+
 	/// The journal itself is the retry queue, even if Postgres lost the rows.
 	pub fn pending_transactions(&self) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
 		self.raw.iter().filter(|(txid, _)| !self.confirmed.contains(*txid))
@@ -82,6 +92,20 @@ impl Journal {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn confirmed_batch_waits_for_every_restored_row() {
+		let p = std::env::temp_dir().join(format!("journal-confirmed-{}", std::process::id()));
+		let _ = std::fs::remove_file(&p);
+		let mut j = Journal::open(&p).unwrap();
+		j.record(&["a:0".into(), "b:1".into()], "tx1", &[1, 2]).unwrap();
+		j.mark_confirmed("tx1");
+		j.reconcile_confirmed(&HashSet::from(["a:0".into()]));
+		assert_eq!(j.pending_transactions().unwrap(), vec![("tx1".into(), vec![1, 2])]);
+		j.reconcile_confirmed(&HashSet::from(["a:0".into(), "b:1".into()]));
+		assert!(j.pending_transactions().unwrap().is_empty());
+		std::fs::remove_file(p).unwrap();
+	}
 
 	#[test]
 	fn interrupted_append_never_exposes_part_of_a_batch() {

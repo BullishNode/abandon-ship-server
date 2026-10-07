@@ -9,7 +9,7 @@ mod db;
 mod journal;
 mod receipt;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -126,15 +126,17 @@ async fn reconcile_local(
 	db: &mut tokio_postgres::Client, journal: &mut journal::Journal,
 ) -> anyhow::Result<()> {
 	let mut unjournaled: BTreeMap<String, Vec<String>> = BTreeMap::new();
+	let mut confirmed_ids = HashSet::new();
 	for (id, txid, confirmed) in db::paid_ids(db).await? {
-		if confirmed { journal.mark_confirmed(&txid); }
 		if !journal.contains(&id) || !journal.has_transaction(&txid) {
-			unjournaled.entry(txid).or_default().push(id);
+			unjournaled.entry(txid).or_default().push(id.clone());
 		}
+		if confirmed { confirmed_ids.insert(id); }
 	}
 	for (txid, ids) in unjournaled {
 		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
 	}
+	journal.reconcile_confirmed(&confirmed_ids);
 	// A backup taken after a claim but before signing still has its row.
 	// Reattach its journaled transaction instead of building another payment.
 	for claim in db::claimed_payouts(db).await? {
