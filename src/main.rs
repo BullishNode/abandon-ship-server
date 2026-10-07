@@ -7,6 +7,7 @@ mod checks;
 mod config;
 mod db;
 mod journal;
+mod receipt;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -50,14 +51,17 @@ async fn main() -> anyhow::Result<()> {
 	let cfg_path = PathBuf::from(args.next().unwrap_or_else(|| "config.toml".into()));
 	let mut once = false;
 	let mut export = None;
+	let mut receipts_only = false;
 	while let Some(arg) = args.next() {
 		match arg.as_str() {
 			"--once" => once = true,
+			"--export-receipts" => receipts_only = true,
 			"--export-settlement-ids" => export = Some(PathBuf::from(args.next()
 				.ok_or_else(|| anyhow::anyhow!("missing settlement ID output path"))?)),
 			_ => anyhow::bail!("unknown argument {arg}"),
 		}
 	}
+	anyhow::ensure!(!receipts_only || export.is_none(), "choose one export mode");
 	let cfg = Config::load(&cfg_path)?;
 	let sweep_spks = cfg.policy.sweep_addresses.iter()
 		.map(|a| Ok(Address::from_str(a)?.require_network(cfg.network)
@@ -69,6 +73,21 @@ async fn main() -> anyhow::Result<()> {
 	// Exactly one instance.
 	anyhow::ensure!(db::try_lead(&db).await?, "another sidecar instance holds the leader lock");
 	db::check_tables(&db).await?;
+	if receipts_only {
+		let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
+		let journal = journal::Journal::open(&cfg.journal_path)?;
+		let txids = db::paid_ids(&db).await?.into_iter().map(|(_, txid, _)| txid)
+			.chain(journal.txids()).collect::<BTreeSet<_>>();
+		let mut failed = 0;
+		for txid in txids {
+			if let Err(e) = ensure_receipt(&cfg, &db, &chain, &txid).await {
+				warn!(%txid, "receipt export failed: {e:#}");
+				failed += 1;
+			}
+		}
+		anyhow::ensure!(failed == 0, "{failed} payout receipts could not be exported");
+		return Ok(());
+	}
 	// Earlier builds quarantined the whole round. Reconsider those coins
 	// under the exact-path rule; every payout still requires chain evidence.
 	db.execute("DELETE FROM sidecar.quarantine WHERE reason LIKE 'round partially unrolled by %'", &[]).await?;
@@ -173,7 +192,7 @@ async fn tick(
 
 	// Durable signed retries do not depend on captaind being available.
 	reconcile_local(db, journal).await?;
-	settle_inflight(db, chain, journal).await?;
+	settle_inflight(cfg, db, chain, journal).await?;
 	reconcile_claims(cfg, db, journal, captaind).await?;
 	reconcile_local(db, journal).await?;
 
@@ -363,6 +382,9 @@ async fn pay_claimed(
 				.map(|p| p.vtxo_id.clone()).collect();
 			db::mark_signed(db, &ids, &txid, &built.raw).await?; // persisted before broadcast
 			journal.record(&ids, &txid, &built.raw)?;            // and on local disk
+			if let Err(e) = receipt::write(&cfg.journal_path.with_extension("receipts"), &built.tx, &expected, built.fee_sat) {
+				warn!(%txid, "fee receipt unavailable; payout remains recoverable: {e:#}");
+			}
 			chain.broadcast(built.raw).await?;
 			db::set_state_by_txid(db, &txid, "broadcast").await?;
 			info!(%txid, coins = ids.len(), fee = built.fee_sat, "payout broadcast");
@@ -374,9 +396,12 @@ async fn pay_claimed(
 
 /// Retry every journaled transaction until confirmed, including lost DB rows.
 async fn settle_inflight(
-	db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal,
+	cfg: &Config, db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal,
 ) -> anyhow::Result<()> {
 	for (txid, raw) in journal.pending_transactions()? {
+		if let Err(e) = ensure_receipt(cfg, db, chain, &txid).await {
+			warn!(%txid, "fee receipt unavailable; retrying payment independently: {e:#}");
+		}
 		let confs = chain.confirmations(&txid).await.unwrap_or(0);
 		if confs >= 6 {
 			db::set_state_by_txid(db, &txid, "confirmed").await?;
@@ -398,4 +423,21 @@ async fn settle_inflight(
 	}
 
 	Ok(())
+}
+
+/// Receipts are auxiliary accounting, never a prerequisite for recovering funds.
+async fn ensure_receipt(
+	cfg: &Config, db: &tokio_postgres::Client, chain: &chain::Chain, txid: &str,
+) -> anyhow::Result<()> {
+	let directory = cfg.journal_path.with_extension("receipts");
+	if directory.join(format!("{txid}.json")).try_exists()? {
+		// A prior rename may have succeeded before its directory sync failed.
+		std::fs::File::open(&directory)?.sync_all()?;
+		return Ok(());
+	}
+	let tx = bitcoin::consensus::deserialize(&db::raw_tx(db, txid).await?)?;
+	let expected = db::receipt_amounts(db, txid).await?.into_iter().map(|(address, amount)| {
+		Ok((Address::from_str(&address)?.require_network(cfg.network)?.script_pubkey(), amount))
+	}).collect::<anyhow::Result<Vec<_>>>()?;
+	receipt::write(&directory, &tx, &expected, chain.transaction_fee(&tx).await?)
 }

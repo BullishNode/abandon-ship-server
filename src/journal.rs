@@ -38,6 +38,7 @@ impl Journal {
 	}
 
 	pub fn ids(&self) -> Vec<String> { self.paid.keys().cloned().collect() }
+	pub fn txids(&self) -> impl Iterator<Item = String> + '_ { self.paid.values().cloned() }
 	pub fn contains(&self, id: &str) -> bool { self.paid.contains_key(id) }
 	pub fn has_transaction(&self, txid: &str) -> bool { self.raw.contains_key(txid) }
 

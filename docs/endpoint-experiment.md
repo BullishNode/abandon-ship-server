@@ -75,6 +75,25 @@ summed recipient deductions to equal the entire reported mining fee and checks
 each output's percentage/dust limit. Multiple selected coins sharing a key share
 one output. Gross for that output is the sum of its actually selected claims.
 
-This branch does not deliver gross/net/fee receipts to clients. Seed recovery
-finds and spends the on-chain net value; it cannot infer the original entitlement
-amount or fee from historical spent coins sharing that key.
+The sidecar writes `<txid>.json` under `journal_path.with_extension("receipts")`
+after storing and journaling each signed payment. Each recipient entry contains
+`vout`, `amount_sat` (net) and `fee_sat`; change is excluded. Amounts come only from
+claims selected for that transaction. Files are fsynced and renamed atomically.
+Serve only this public directory at `/expiry-payouts/` on the Ark HTTP origin;
+never expose the private journal. This requires no captaind API change.
+
+Publication errors warn and leave payment/rebroadcast independent. Pending
+payments retry publication. To repair missing historical files, stop the sidecar
+writer and run `abandon-ship-server config.toml --export-receipts`. This takes the
+leader lock, reads local rows and journal transaction IDs, and changes neither
+payments, quarantines nor journal. Valid independent exports continue; any
+missing/incomplete metadata or fee mismatch gives an overall failure. History
+reconstruction needs Core to retrieve the payout's funding transactions.
+
+After restoring an older state database, run normal reconciliation against the
+retained captaind receipts and current journal before retrying failed exports.
+The raw journal alone has no gross entitlement amounts. Keep existing valid
+public receipts; they remain usable while ledger recovery is incomplete. Seed
+recovery finds and spends the on-chain net value without receipt metadata;
+missing metadata means an unknown fee, not zero. Never infer gross from all
+historical spent coins sharing a key.

@@ -75,6 +75,12 @@ pub async fn raw_tx(db: &Client, txid: &str) -> anyhow::Result<Vec<u8>> {
 	Ok(db.query_one("SELECT raw_tx FROM sidecar.payout WHERE txid = $1 LIMIT 1", &[&txid]).await?.try_get("raw_tx")?)
 }
 
+pub async fn receipt_amounts(db: &Client, txid: &str) -> anyhow::Result<Vec<(String, u64)>> {
+	db.query("SELECT address, sum(amount_sat)::bigint AS amount FROM sidecar.payout
+		WHERE txid = $1 GROUP BY address", &[&txid]).await?.into_iter()
+		.map(|r| Ok((r.try_get("address")?, r.try_get::<_, i64>("amount")? as u64))).collect()
+}
+
 pub async fn claimed_payouts(db: &Client) -> anyhow::Result<Vec<Payout>> {
 	let rows = db.query(
 		"SELECT vtxo_id, amount_sat, address FROM sidecar.payout WHERE state = 'claimed' ORDER BY claimed_at",
