@@ -1,0 +1,57 @@
+Published dependency qualification, 2026-10-07
+
+Bark endpoint source: BullishNode/bark 5848679f84ac0efc67b3d7b2b618aa516e38450f
+Adapter source before manifest change: 2ce749a4c8ba2d80f0a96e72c8b0a01fd500077b
+Changed local Cargo paths to the published Git revision. No package versions changed.
+Locked unit suite: 8 PASS / 0 FAIL. Locked build: PASS.
+These are packaging checks, not an additional full-suite or production qualification.
+
+RUN cargo test
+    Updating git repository `https://github.com/BullishNode/bark`
+From https://github.com/BullishNode/bark
+ * [new ref]           5848679f84ac0efc67b3d7b2b618aa516e38450f -> refs/commit/5848679f84ac0efc67b3d7b2b618aa516e38450f
+     Locking 3 packages to latest compatible versions
+      Adding ark-lib v0.7.1 (https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f)
+      Adding bark-bitcoin-ext v0.7.1 (https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f)
+      Adding bark-server-rpc v0.7.1 (https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f)
+   Compiling bark-server-rpc v0.7.1 (https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f)
+   Compiling bark-bitcoin-ext v0.7.1 (https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f)
+   Compiling ark-lib v0.7.1 (https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f)
+   Compiling abandon-ship-server v0.1.0 (/home/francis/abandon-ship-server-captaind-api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.39s
+     Running unittests src/main.rs (target/debug/deps/abandon_ship_server-788614ab9f00c646)
+
+running 8 tests
+test checks::tests::a_swept_sibling_is_not_this_coins_sweep ... ok
+test checks::tests::affordability ... ok
+test checks::tests::sweep_only_to_sweep_scripts ... ok
+test checks::tests::all_mining_fees_come_from_receivers ... ok
+test checks::tests::payout_verification ... ok
+test journal::tests::reads_legacy_complete_records ... ok
+test journal::tests::survives_reopen ... ok
+test journal::tests::interrupted_append_never_exposes_part_of_a_batch ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+EXIT 0
+RUN cargo test --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/main.rs (target/debug/deps/abandon_ship_server-788614ab9f00c646)
+
+running 8 tests
+test checks::tests::a_swept_sibling_is_not_this_coins_sweep ... ok
+test checks::tests::affordability ... ok
+test checks::tests::payout_verification ... ok
+test checks::tests::sweep_only_to_sweep_scripts ... ok
+test checks::tests::all_mining_fees_come_from_receivers ... ok
+test journal::tests::reads_legacy_complete_records ... ok
+test journal::tests::survives_reopen ... ok
+test journal::tests::interrupted_append_never_exposes_part_of_a_batch ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+EXIT 0
+RUN cargo build --locked
+   Compiling abandon-ship-server v0.1.0 (/home/francis/abandon-ship-server-captaind-api)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.28s
+EXIT 0

@@ -6,9 +6,9 @@ description = "Sidecar for captaind: pays expired, unrefreshed Ark coins on-chai
 license = "MIT"
 
 [dependencies]
-# This comparison branch uses the matching local captaind patch.
-ark-lib = { path = "../abandon-ship-bark-captaind-api/lib" }
-bark-server-rpc = { path = "../abandon-ship-bark-captaind-api/server-rpc", default-features = false, features = ["tonic-native"] }
+# Generated admin client from the published captaind comparison patch.
+ark-lib = { git = "https://github.com/BullishNode/bark", rev = "5848679f84ac0efc67b3d7b2b618aa516e38450f" }
+bark-server-rpc = { git = "https://github.com/BullishNode/bark", rev = "5848679f84ac0efc67b3d7b2b618aa516e38450f", default-features = false, features = ["tonic-native"] }
 bitcoin = "0.32.7"
 bitcoincore-rpc = "0.19"
 

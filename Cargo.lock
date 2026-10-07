@@ -48,6 +48,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "ark-lib"
 version = "0.7.1"
+source = "git+https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f84ac0efc67b3d7b2b618aa516e38450f"
 dependencies = [
  "async-trait",
  "bark-bitcoin-ext",
@@ -96,6 +97,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 [[package]]
 name = "bark-bitcoin-ext"
 version = "0.7.1"
+source = "git+https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f84ac0efc67b3d7b2b618aa516e38450f"
 dependencies = [
  "bitcoin",
  "lazy_static",
@@ -107,6 +109,7 @@ dependencies = [
 [[package]]
 name = "bark-server-rpc"
 version = "0.7.1"
+source = "git+https://github.com/BullishNode/bark?rev=5848679f84ac0efc67b3d7b2b618aa516e38450f#5848679f84ac0efc67b3d7b2b618aa516e38450f"
 dependencies = [
  "ark-lib",
  "bitcoin",

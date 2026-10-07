@@ -1,7 +1,7 @@
 # Captaind endpoint comparison
 
-This branch pairs with `abandon-ship-bark-captaind-api` and uses its generated
-private admin client. The Cargo paths are local experiment dependencies. The
+This branch pairs with BullishNode/bark `experiment/captaind-settlement-api`
+and pins its generated private admin client by Git revision. The
 existing direct-database deployment and regtest scripts are not adapter scripts.
 The executed isolated results and limitations are recorded in the external
 `captaind-endpoint-comparison-2026-10-04.md` report.
