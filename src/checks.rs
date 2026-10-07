@@ -59,6 +59,7 @@ pub fn is_sweep_of(spender: &Transaction, outpoint: OutPoint, sweep_spks: &[Scri
 /// - every expected script gets exactly one output, worth at most the expected
 ///   amount and at least expected minus the whole fee;
 /// - every output's fee share is within `max_fee_pct` and leaves dust;
+/// - recipient deductions equal the entire mining fee;
 /// - at most one other output (change), which the caller checks is ours.
 ///
 /// Returns the change output's script, if any.
@@ -76,12 +77,14 @@ pub fn verify_payout(
 		anyhow::ensure!(want.insert(spk, *amt).is_none(), "duplicate payout script");
 	}
 	let mut change = None;
+	let mut deducted = 0;
 	for o in &tx.output {
 		match want.remove(&o.script_pubkey) {
 			Some(amt) => {
 				let v = o.value.to_sat();
 				anyhow::ensure!(v <= amt && v + fee_sat >= amt,
 					"output {v} for expected {amt} outside fee bound");
+				deducted += amt - v;
 				anyhow::ensure!(affordable(amt, amt - v, max_fee_pct),
 					"output {v} for expected {amt}: fee share above {max_fee_pct}% or below dust");
 			},
@@ -92,6 +95,7 @@ pub fn verify_payout(
 		}
 	}
 	anyhow::ensure!(want.is_empty(), "{} expected output(s) missing", want.len());
+	anyhow::ensure!(deducted == fee_sat, "recipient deductions {deducted} do not equal mining fee {fee_sat}");
 	Ok(change)
 }
 
@@ -145,6 +149,16 @@ mod tests {
 		spending_b.input.push(TxIn { previous_output: b, ..Default::default() });
 		assert!(is_sweep_of(&spending_b, b, std::slice::from_ref(&sweep)));
 		assert!(!is_sweep_of(&spending_b, a, &[sweep]));
+	}
+
+	#[test]
+	fn all_mining_fees_come_from_receivers() {
+		let exp = vec![(spk(1), 10_000), (spk(2), 20_000)];
+		// Each output separately satisfies the fee bound in all three cases.
+		for (a, b) in [(9_950, 19_950), (9_800, 19_800)] {
+			assert!(verify_payout(&tx(vec![(spk(1), a), (spk(2), b)]), &exp, 300, 20).is_err());
+		}
+		assert!(verify_payout(&tx(vec![(spk(1), 9_850), (spk(2), 19_850)]), &exp, 300, 20).is_ok());
 	}
 
 	#[test]
