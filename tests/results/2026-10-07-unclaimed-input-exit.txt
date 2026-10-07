@@ -1,0 +1,118 @@
+Unclaimed refresh input exit — 2026-10-07
+
+Private abandon-verify stack; original abandon-regtest volumes untouched.
+Before: main-H SHA256 cd5fb185e576bde78e7bcee891f76767bf4028b5730bc14ca2270c0a9d3b9203.
+After: SHA256 097c21e87112e6d5ced6e72b947d8ad0208b0ec0a42002023fb885071eb83ab4.
+Frozen sources/binaries: session2-continuation/stages/{recovery-main-h,unclaimed-inputs-a}.
+cargo test --locked: 10 PASS, 0 FAIL. cargo build --locked: PASS.
+
+The first attempt failed setup: the CLI synced with Ark and finished the forfeit before starting the exit. Corrected by stopping private captaind only during exit start, then restarting before mining and verifying forfeits remain absent. Exit claim skips Ark sync.
+
+Corrected scenarios use real delegated refreshes, a saved pre-refresh wallet, a confirmed original-input leaf claim, an expired/swept replacement, and actual sidecar ticks. Two-input variants also assert that the other original input was swept. No row mutation substitutes for the exit. Negative assertions require no replacement claim/payout. Positive cases recover and spend payouts using the owner seed with Bitcoin Core.
+
+20261007T230512-f8458c2b: unclaimed-input-exit — actual exit 1; 330.6s
+[unclaimed-input-exit] ok: original input has no signed forfeit
+[unclaimed-input-exit] ok: replacement remains unclaimed
+[unclaimed-input-exit] NOT OK: old user leaf confirmed before expiry
+[unclaimed-input-exit] ok: every paid coin is spent and nothing else spent it
+[unclaimed-input-exit] ok: every ledger row with a txid is journaled
+FAIL unclaimed-input-exit: old user leaf confirmed before expiry
+
+20261007T231138-2c7fdab0: unclaimed-input-exit-offline-start — actual exit 1; 185.0s
+[unclaimed-input-exit] ok: original input has no signed forfeit
+[unclaimed-input-exit] ok: replacement remains unclaimed
+[unclaimed-input-exit] ok: starting the saved wallet exit did not complete forfeits
+[unclaimed-input-exit] ok: old user leaf confirmed before expiry
+[unclaimed-input-exit] ok: owner spent the old exit output
+[unclaimed-input-exit] ok: owner exit spend confirmed
+[unclaimed-input-exit] ok: replacement still has no completed forfeit
+[unclaimed-input-exit]   got 'a1b20f1bcd6d9697af29de2b16f9fa8357d4129f187095b240141663dc2cc96e', want ''
+[unclaimed-input-exit] NOT OK: exited predecessor prevents replacement payout
+[unclaimed-input-exit]   got 'broadcast', want ''
+[unclaimed-input-exit] NOT OK: replacement was not irreversibly claimed
+[unclaimed-input-exit] ok: every paid coin is spent and nothing else spent it
+[unclaimed-input-exit] ok: every ledger row with a txid is journaled
+FAIL unclaimed-input-exit: exited predecessor prevents replacement payout;replacement was not irreversibly claimed
+
+20261007T231619-09a72a7b: unclaimed-input-exit-input-proof — actual exit 0; 111.4s
+[unclaimed-input-exit] ok: original input has no signed forfeit
+[unclaimed-input-exit] ok: replacement remains unclaimed
+[unclaimed-input-exit] ok: starting the saved wallet exit did not complete forfeits
+[unclaimed-input-exit] ok: old user leaf confirmed before expiry
+[unclaimed-input-exit] ok: owner spent the old exit output
+[unclaimed-input-exit] ok: owner exit spend confirmed
+[unclaimed-input-exit] ok: replacement still has no completed forfeit
+[unclaimed-input-exit] ok: exited predecessor prevents replacement payout
+[unclaimed-input-exit] ok: replacement was not irreversibly claimed
+[unclaimed-input-exit] ok: every paid coin is spent and nothing else spent it
+[unclaimed-input-exit] ok: every ledger row with a txid is journaled
+PASS unclaimed-input-exit
+
+20261007T231810-bd1a7ab4: unclaimed-delegated-input-proof — actual exit 0; 84.4s
+[unclaimed-delegated] board coin 53aa04c837b3edb46ba526ee7bd01442f1e2a491a9270e090010637df6b44469:0; delegated refresh, then the owner goes away
+[unclaimed-delegated] ok: delegated refresh ran in a round
+[unclaimed-delegated] ok: one unclaimed output
+[unclaimed-delegated] unclaimed output fca143a20a6a7197613ebae95d8cc6b9ef33e87746b68b9ebe6704999c9dfef6:0 (149520 sat)
+[unclaimed-delegated] ok: paid within 3 ticks
+[unclaimed-delegated] ok: not quarantined
+[unclaimed-delegated] ok: output within fee share of 149520 (got 148794)
+[unclaimed-delegated] ok: descriptor from the seed
+[unclaimed-delegated] ok: seed wallet sees the payout (148794 sat)
+[unclaimed-delegated] ok: seed wallet swept it on-chain
+[unclaimed-delegated] ok: every paid coin is spent and nothing else spent it
+[unclaimed-delegated] ok: every ledger row with a txid is journaled
+PASS unclaimed-delegated
+
+20261007T232042-7b82d41c: unclaimed-mixed-before — actual exit 1; 88.7s
+[unclaimed-input-exit] ok: 2 original inputs
+[unclaimed-input-exit] ok: original input has no signed forfeit
+[unclaimed-input-exit] ok: replacement remains unclaimed
+[unclaimed-input-exit] ok: starting the saved wallet exit did not complete forfeits
+[unclaimed-input-exit] ok: old user leaf confirmed before expiry
+[unclaimed-input-exit] ok: owner spent the old exit output
+[unclaimed-input-exit] ok: owner exit spend confirmed
+[unclaimed-input-exit] ok: replacement still has no completed forfeit
+[unclaimed-input-exit] ok: other original input was swept
+[unclaimed-input-exit]   got '965eb0b680befe75e3e9cce3386b9bd18eeea6aedcc1a5dd2e3e6a2f31f6a3cb', want ''
+[unclaimed-input-exit] NOT OK: exited predecessor prevents replacement payout
+[unclaimed-input-exit]   got 'broadcast', want ''
+[unclaimed-input-exit] NOT OK: replacement was not irreversibly claimed
+[unclaimed-input-exit] ok: every paid coin is spent and nothing else spent it
+[unclaimed-input-exit] ok: every ledger row with a txid is journaled
+FAIL unclaimed-input-exit: exited predecessor prevents replacement payout;replacement was not irreversibly claimed
+
+20261007T232211-aed9ab12: unclaimed-mixed-after — actual exit 0; 91.0s
+[unclaimed-input-exit] ok: 2 original inputs
+[unclaimed-input-exit] ok: original input has no signed forfeit
+[unclaimed-input-exit] ok: replacement remains unclaimed
+[unclaimed-input-exit] ok: starting the saved wallet exit did not complete forfeits
+[unclaimed-input-exit] ok: old user leaf confirmed before expiry
+[unclaimed-input-exit] ok: owner spent the old exit output
+[unclaimed-input-exit] ok: owner exit spend confirmed
+[unclaimed-input-exit] ok: replacement still has no completed forfeit
+[unclaimed-input-exit] ok: other original input was swept
+[unclaimed-input-exit] ok: exited predecessor prevents replacement payout
+[unclaimed-input-exit] ok: replacement was not irreversibly claimed
+[unclaimed-input-exit] ok: every paid coin is spent and nothing else spent it
+[unclaimed-input-exit] ok: every ledger row with a txid is journaled
+PASS unclaimed-input-exit
+
+20261007T232342-11cd202e: unclaimed-both-swept — actual exit 0; 58.7s
+[unclaimed-delegated] ok: 2 original inputs
+[unclaimed-delegated] board coins cc146cf8344cbc64ad9cb5124dbb46a21897418d28e0689a1fc425101e1134f6:0 06363d134d42c9c0f01a3cb7aa7fd31a013a16e4f7bd4ae03054e0f17f3186fa:0; delegated refresh, then the owner goes away
+[unclaimed-delegated] ok: delegated refresh ran in a round
+[unclaimed-delegated] ok: one unclaimed output
+[unclaimed-delegated] unclaimed output 99ec18a4744548420ef2af6e1c8ac7c7aab2a0327470764527a3cd4dd13e08b6:0 (299190 sat)
+[unclaimed-delegated] ok: paid within 3 ticks
+[unclaimed-delegated] ok: not quarantined
+[unclaimed-delegated] ok: output within fee share of 299190 (got 298463)
+[unclaimed-delegated] ok: descriptor from the seed
+[unclaimed-delegated] ok: seed wallet sees the payout (298463 sat)
+[unclaimed-delegated] ok: seed wallet swept it on-chain
+[unclaimed-delegated] ok: every paid coin is spent and nothing else spent it
+[unclaimed-delegated] ok: every ledger row with a txid is journaled
+PASS unclaimed-delegated
+
+Result: intended single-input and mixed-input double-settlement assertions FAIL before and PASS after. Legitimate one- and two-input unclaimed recoveries PASS after.
+A mixed participation still needs accounting review for any unpaid swept-input portion; automatic partial compensation is not implemented. This fix prevents a second full payout and preserves the records; it does not prove every residual entitlement is automatically settled.
+No complete combined suite, B/C qualification, signet rehearsal or production-readiness claim in this report.

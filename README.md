@@ -17,7 +17,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 5. **Per coin.** Invalid coin data is quarantined. Infrastructure errors abort the tick; exceeding the quarantine limit stops the process.
    1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
    2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
-   3. **Sweep.** Validate the coin's exit path against its anchor transaction. A transaction buried `sweep_min_confs` must spend an exact outpoint on that path and pay only the configured `sweep_addresses` (ignoring OP_RETURN and P2A). Sweeping a sibling does not qualify this coin.
+   3. **Sweep.** Validate the coin's exit path against its anchor transaction. A transaction buried `sweep_min_confs` must spend an exact outpoint on that path and pay only the configured `sweep_addresses` (ignoring OP_RETURN and P2A). Sweeping a sibling does not qualify this coin. For an unclaimed hArk replacement, the same proof is required for every original input of its participation; its new round does not revoke an old exit.
    4. **In flight.** Skip while a round participation still references the coin.
    5. **Ban, then wait.** Set `banned_until_height`, then wait `ban_wait_secs`. The claim needs that exact ban still in place: if an operator lifts it, the wait restarts.
    6. **Claim.** In one transaction: `UPDATE vtxo SET spend_state='spent' WHERE … spend_state IN ('spendable','unclaimed') AND <our ban>`, then insert the payout row.

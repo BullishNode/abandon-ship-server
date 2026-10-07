@@ -4,13 +4,20 @@
 # (examples/coin_key_descriptor.rs).
 . "$(dirname "$0")/lib.sh"
 mkcfg
+INPUT_COUNT=${1:-1}
+[[ "$INPUT_COUNT" = 1 || "$INPUT_COUNT" = 2 ]] || exit 2
 D=$(wname d); newwallet "$D"
 mine 1
-bark "$D" board "150000 sat" > "$LOG/board.log" || say "board failed"
-mine 4
-B=$(coins "$D")
-say "board coin $B; delegated refresh, then the owner goes away"
-bark "$D" refresh --delegated --all > "$LOG/delegated.log" 2>&1 || say "delegated refresh failed"
+for i in $(seq "$INPUT_COUNT"); do
+	bark "$D" board "150000 sat" >> "$LOG/board.log" || exit 2
+	mine 4
+done
+mapfile -t INPUTS < <(coins "$D")
+check "$INPUT_COUNT original inputs" eq "${#INPUTS[@]}" "$INPUT_COUNT"
+[ ${#FAILS[@]} -eq 0 ] || finish
+B=${INPUTS[0]}
+say "board coins ${INPUTS[*]}; delegated refresh, then the owner goes away"
+bark "$D" refresh --delegated --all > "$LOG/delegated.log" 2>&1 || exit 2
 for i in $(seq 40); do
 	RID=$(refreshed "$B")
 	[ -n "$RID" ] && break; sleep 3

@@ -10,7 +10,7 @@
 
 | # | Failure | Guard | Scenarios (`tests/regtest/`) |
 | --- | --- | --- | --- |
-| 1 | The same coin is refreshed, exited **and** paid | Conditional claim racing captaind's conditional spends (exactly one wins). Ban, then wait longer than a round; the claim requires our ban intact. No claim while the coin is in a round participation. Payout only after a sweep of an exact outpoint on the validated coin exit path, `sweep_min_confs` deep; leaf-confirmed coins are never candidates | `race-user-refresh`, `race-held-lock`, `race-operator-unban`, `claim-gates`, `h2-probe`, `exit-full`, `exit-blocked`, `unclaimed-delegated` |
+| 1 | The same coin is refreshed, exited **and** paid | Conditional claim racing captaind's conditional spends (exactly one wins). Ban, then wait longer than a round; the claim requires our ban intact. No claim while the coin is in a round participation. Payout only after a sweep of an exact outpoint on the validated coin exit path, `sweep_min_confs` deep; leaf-confirmed coins are never candidates. Unclaimed hArk replacements also require the same exact-path sweep proof for every original participation input | `race-user-refresh`, `race-held-lock`, `race-operator-unban`, `claim-gates`, `h2-probe`, `exit-full`, `exit-blocked`, `unclaimed-delegated`, `unclaimed-input-exit` |
 | 2 | Paying the wrong branch of a partially exited round | A confirmed sweep must spend an exact outpoint on this coin's validated exit path. A swept sibling, including a different output of the same transaction, never qualifies | `exit-full`, `exit-breaker`, `exit-blocked` |
 | 3 | A crash or a DB restore loses an outstanding payment | Tx stored in the DB, then journaled as one complete batch with raw bytes (fsync), then broadcast. Partial final records are replaced before appending. Restored claims reattach the journaled transaction as a batch; a confirmed peer cannot hide a pending restored member; the journal retries it even when the payout rows are missing. Captaind's startup wrapper waits for a fresh completed reassertion before serving clients. Reassertion runs before Core access; missing or conflicting Ark history prevents the completion marker. A rejected stored payout keeps its inputs reserved while other batches proceed. A journaled coin spendable again after a restore is re-marked spent and its journaled tx rebroadcast. Ledger rows only move forward | `crash-signed`, `db-restore`, `restore-retry`, `restore-postgres`, `restore-missing-history`, `restore-startup`, `restore-kill`, `restore-mixed-batch`, `restore-gate`, `tamper-payout`, `broadcast-rejected` |
 | 4 | Fees or selection block eligible payouts indefinitely | No estimate: no new claims or transactions; stored payouts still retry (no fallback rate). Per-coin rule: pay only if the fee share is ≤ `max_fee_pct_per_payout` and the coin ≥ `min_payout_sat`; smaller coins and coins unaffordable at the current rate are filtered before the candidate limit. A coin that cannot be processed waits or is quarantined alone; a burst of quarantines stops the process. Safe unlocked payout inputs are selected largest first. Existing claims get the first payment attempt; a batch failing its actual fee or funding check is reduced, and deferred claims do not block new claims | `fee-pct-rule`, `fee-no-estimate`, `circuit-breaker`, `happy-batch`, `fee-stuck-claim`, `fee-window`, `fee-fragmented`, `fee-fragmented-progress`, `exit-breaker` |
@@ -20,12 +20,20 @@ Process: one instance (Postgres advisory lock); the captaind schema version is a
 
 ## Limitations
 
-- **Quarantine** (a coin is never touched again automatically; manual review):
-  - `undecodable vtxo`: released by a sidecar build that reads the new encoding; the operator then deletes the row from `sidecar.quarantine` and the coin is a candidate again.
-  - `unparseable spender txid`: as above, for a change in how captaind records the sweep.
-  - Legacy `round partially unrolled by …` rows are removed at startup. Those coins are reconsidered under the exact-path rule; they still need a confirmed sweep on their own path.
-  - `invalid exit path`: repair the stored VTXO or its decoder using the original round evidence, then remove its quarantine and retry.
-  - `payout committed in local journal`: the restored coin stays spent; the journal retains and retries its original transaction. Confirmation settles it. Missing Ark history requires the matching database backup/WAL before captaind restarts.
+Quarantine leaves the claim recorded for review. Removing a row only makes a coin eligible for rechecking; it does not bypass any payment guard.
+
+| Quarantine reason | Release evidence | Next action |
+| --- | --- | --- |
+| `undecodable vtxo`, `undecodable unclaimed input` | The original coin/round bytes decode with the supported version | Restore correct history or update the decoder; remove this quarantine and retry |
+| `unparseable spender txid` | A valid recorded spender matching the exact on-chain outpoint | Repair the record from chain/round evidence; remove the quarantine and retry |
+| `invalid exit path` | The stored path validates against the original anchor transaction | Repair the stored bytes or decoder from original round evidence; remove the quarantine and retry |
+| `unclaimed output has no hArk participation hash` | The output's original hArk data identifies its participation | Restore/decode that data; remove the quarantine and retry |
+| `unclaimed output's original input history is missing` | Matching funding transaction and unlock hash resolve all original input records | Restore the matching round/participation/input history; remove the quarantine and retry |
+| `payout committed in local journal` | The original journaled transaction confirms | Keep the coin spent and retain the journal; the retry path settles the payment independently of quarantine. Missing Ark history requires matching backup/WAL before captaind restarts |
+| Legacy `round partially unrolled by …` | Confirmed sweep on this coin's exact path | Startup removes these obsolete quarantine rows; the current path proof decides eligibility |
+
+An unclaimed replacement whose original input has no confirmed sweep waits without being banned or claimed. An input already claimed by its owner cannot receive a second full payout through its replacement. A participation mixing exited inputs with swept inputs remains for accounting review: automatic partial compensation is not implemented. Its remaining input records must be retained to resolve the unpaid portion; deleting the participation is not settlement.
+
 - **Waiting on fees** keeps the coin with the operator: no estimate or a fee share above the cap leaves it unpaid until fees fall. Unclaimed coins stay refreshable; already-claimed coins retain their payout obligation.
 - **Confirmation floor:** with `grace_blocks` ≥ 144 above `sweep_min_confs` ≥ 100 (mainnet floors), a sweep made at expiry is already deep enough when the grace period ends; `sweep_min_confs` only matters for late sweeps.
 - **Reorgs:** a payout is not re-checked after 6 confirmations; a deeper reorg that drops it goes unnoticed.

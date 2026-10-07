@@ -10,6 +10,7 @@ const LEADER_LOCK: i64 = 0x41_42_41_4e_44_4f_4e; // "ABANDON"
 pub struct Candidate {
 	pub vtxo_id: String,
 	pub vtxo: Vec<u8>,
+	pub unclaimed: bool,
 }
 
 pub struct Payout {
@@ -53,7 +54,7 @@ pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
 /// pay never fill the window).
 pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64) -> anyhow::Result<Vec<Candidate>> {
 	let rows = db.query("
-		SELECT v.vtxo_id, v.vtxo
+		SELECT v.vtxo_id, v.vtxo, v.spend_state = 'unclaimed' AS unclaimed
 		FROM vtxo v
 		WHERE v.policy_type = 'pubkey'
 		  -- 'unclaimed' = a delegated refresh output whose owner never came back
@@ -70,8 +71,21 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amoun
 		.map(|r| Ok(Candidate {
 			vtxo_id: r.try_get("vtxo_id")?,
 			vtxo: r.try_get("vtxo")?,
+			unclaimed: r.try_get("unclaimed")?,
 		}))
 		.collect()
+}
+
+/// Original inputs of this unclaimed hArk output's participation. Its own
+/// sweep says nothing about an old input's still-usable unilateral exit.
+pub async fn unclaimed_inputs(db: &Client, round_txid: &str, unlock_hash: &str) -> anyhow::Result<Vec<Option<Vec<u8>>>> {
+	db.query("
+		SELECT v.vtxo FROM round_participation p
+		JOIN round_part_input i ON i.participation_id = p.id
+		LEFT JOIN vtxo v ON v.vtxo_id = i.vtxo_id
+		WHERE p.round_id = $1 AND p.unlock_hash = $2
+	", &[&round_txid, &unlock_hash]).await?.into_iter()
+		.map(|r| Ok(r.try_get("vtxo")?)).collect()
 }
 
 /// The txid captaind recorded as spending an outpoint, if any. Only a hint:

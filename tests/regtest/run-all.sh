@@ -4,7 +4,7 @@
 # Logs: $OUT (default /tmp/abandon-regtest/<scenario>/).
 cd "$(dirname "$0")"
 . ./lib.sh
-SCENARIOS=(${@:-schema-version happy-single happy-batch shared-address unclaimed-delegated
+SCENARIOS=(${@:-schema-version happy-single happy-batch shared-address unclaimed-delegated unclaimed-input-exit
 	race-held-lock race-user-refresh race-operator-unban claim-gates h2-probe
 	exit-full exit-breaker exit-blocked attack-ban-wait
 	tamper-payout db-restore restore-retry restore-postgres restore-missing-history restore-startup restore-kill restore-mixed-batch restore-gate crash-signed broadcast-rejected

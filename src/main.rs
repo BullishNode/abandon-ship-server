@@ -229,36 +229,62 @@ async fn process_coin(
 	if !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
 		return Ok(Outcome::Wait("fee share above max_fee_pct_per_payout"));
 	}
-	if chain.is_unspent(anchor).await? { return Ok(Outcome::Wait("anchor not swept yet")) }
-	let (anchor_tx, _) = chain.tx(anchor.txid).await?;
-	if let Err(e) = vtxo.validate_unsigned(&anchor_tx) {
-		return Ok(Outcome::Quarantine(format!("invalid exit path: {e}")));
-	}
-	// Only this coin's output at each level belongs to its exit path. A
-	// swept sibling, even in the same transaction, cannot settle this coin.
-	let path = std::iter::once(anchor).chain(vtxo.transactions()
-		.map(|t| OutPoint::new(t.tx.compute_txid(), t.output_idx as u32)));
-	let mut swept = false;
-	for outpoint in path {
-		if outpoint != anchor && chain.is_unspent(outpoint).await? { break; }
-		let Some(spender) = db::recorded_spender(db, &outpoint.to_string()).await? else { continue; };
-		let Ok(spender_txid) = Txid::from_str(&spender) else {
-			return Ok(Outcome::Quarantine(format!("unparseable spender txid {spender:?}")));
+	let mut predecessors = Vec::new();
+	if c.unclaimed {
+		let Some(unlock_hash) = vtxo.unlock_hash() else {
+			return Ok(Outcome::Quarantine("unclaimed output has no hArk participation hash".into()));
 		};
-		let (spend_tx, confs) = match chain.tx(spender_txid).await {
-			Ok(x) => x,
-			Err(e) => {
-				warn!(vtxo = %c.vtxo_id, %spender, "spender tx unavailable: {e:#}");
-				continue;
-			},
-		};
-		if checks::is_sweep_of(&spend_tx, outpoint, sweep_spks) {
-			if confs < p.sweep_min_confs { return Ok(Outcome::Wait("sweep not deep enough")) }
-			swept = true;
-			break;
+		let inputs = db::unclaimed_inputs(db, &anchor.txid.to_string(), &unlock_hash.to_string()).await?;
+		if inputs.is_empty() || inputs.iter().any(Option::is_none) {
+			return Ok(Outcome::Quarantine("unclaimed output's original input history is missing".into()));
+		}
+		for raw in inputs.into_iter().flatten() {
+			match Vtxo::deserialize(&raw) {
+				Ok(input) => predecessors.push(input),
+				Err(e) => return Ok(Outcome::Quarantine(format!("undecodable unclaimed input: {e}"))),
+			}
 		}
 	}
-	if !swept { return Ok(Outcome::Wait("no confirmed sweep on this coin's exit path")) }
+	// A replacement funded before forfeits finish does not cancel its old
+	// inputs' exit transactions. Each must be swept on its own exact path too.
+	for (original_input, proof) in std::iter::once((false, &vtxo))
+		.chain(predecessors.iter().map(|input| (true, input))) {
+		let anchor = proof.chain_anchor();
+		if chain.is_unspent(anchor).await? { return Ok(Outcome::Wait("anchor not swept yet")) }
+		let (anchor_tx, _) = chain.tx(anchor.txid).await?;
+		if let Err(e) = proof.validate_unsigned(&anchor_tx) {
+			return Ok(Outcome::Quarantine(format!("invalid exit path: {e}")));
+		}
+		// Only this coin's output at each level belongs to its exit path. A
+		// swept sibling, even in the same transaction, cannot settle this coin.
+		let path = std::iter::once(anchor).chain(proof.transactions()
+			.map(|t| OutPoint::new(t.tx.compute_txid(), t.output_idx as u32)));
+		let mut swept = false;
+		for outpoint in path {
+			if outpoint != anchor && chain.is_unspent(outpoint).await? { break; }
+			let Some(spender) = db::recorded_spender(db, &outpoint.to_string()).await? else { continue; };
+			let Ok(spender_txid) = Txid::from_str(&spender) else {
+				return Ok(Outcome::Quarantine(format!("unparseable spender txid {spender:?}")));
+			};
+			let (spend_tx, confs) = match chain.tx(spender_txid).await {
+				Ok(x) => x,
+				Err(e) => {
+					warn!(vtxo = %proof.id(), %spender, "spender tx unavailable: {e:#}");
+					continue;
+				},
+			};
+			if checks::is_sweep_of(&spend_tx, outpoint, sweep_spks) {
+				if confs < p.sweep_min_confs { return Ok(Outcome::Wait("sweep not deep enough")) }
+				swept = true;
+				break;
+			}
+		}
+		if !swept {
+			return Ok(Outcome::Wait(if original_input {
+				"unclaimed replacement's original input has no confirmed sweep"
+			} else { "no confirmed sweep on this coin's exit path" }));
+		}
+	}
 
 	// Nothing in flight may hold the coin.
 	if db::in_round_participation(db, &c.vtxo_id).await? { return Ok(Outcome::Wait("in a round participation")) }
