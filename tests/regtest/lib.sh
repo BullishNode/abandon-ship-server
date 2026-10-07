@@ -50,7 +50,7 @@ finish() {
 	check "every paid coin is spent and nothing else spent it" eq "$bad" 0
 	local unjournaled=0 id
 	for id in $(q "SELECT vtxo_id FROM sidecar.payout WHERE txid IS NOT NULL"); do
-		grep -q "^$id " "$JOURNAL" || unjournaled=$((unjournaled + 1))
+		[ "$(journaled "$id")" -gt 0 ] || unjournaled=$((unjournaled + 1))
 	done
 	check "every ledger row with a txid is journaled" eq "$unjournaled" 0
 	if [ ${#FAILS[@]} -eq 0 ]; then echo "PASS $NAME"; exit 0; fi
@@ -231,7 +231,15 @@ payout_address() { q "SELECT address FROM sidecar.payout WHERE vtxo_id='$1'"; }
 spend_state() { q "SELECT spend_state FROM vtxo WHERE vtxo_id='$1'"; }
 quarantine_reason() { q "SELECT reason FROM sidecar.quarantine WHERE vtxo_id='$1'"; }
 bans() { q "SELECT count(*) FROM sidecar.ban WHERE vtxo_id='$1'"; }
-journaled() { grep -c "^$1 " "$JOURNAL"; }
+journaled() {
+	awk -v id="$1" -v txid="${2:-}" 'txid == "" || $2 == txid {
+		n=split($1, ids, ","); for (i=1; i<=n; i++) if (ids[i]==id) count++
+	} END { print count+0 }' "$JOURNAL"
+}
+journal_raw() {
+	awk -v id="$1" '{ if (NF >= 3) raw[$2]=$3; n=split($1, ids, ",");
+		for (i=1; i<=n; i++) if (ids[i]==id) tx=$2 } END { print raw[tx] }' "$JOURNAL"
+}
 anchor_of() { q "SELECT anchor_point FROM vtxo WHERE vtxo_id='$1'"; }
 # Non-empty only when set.
 anchor_spender() { q "SELECT onchain_spent_txid FROM vtxo WHERE vtxo_id='$1' AND onchain_spent_txid IS NOT NULL"; }
@@ -297,7 +305,7 @@ assert_paid() { # assert_paid <id> <user_pubkey> <amount_sat> [max_fee_pct]
 	got=$(paid_to "$txid" "$addr")
 	check "${id:0:8} output within fee share of $amt (got $got)" test "$got" -le "$amt" -a "$got" -ge $((amt * (100 - pct) / 100))
 	check "${id:0:8} spent in captaind" eq "$(spend_state "$id")" spent
-	check "${id:0:8} journaled once, with the ledger txid" eq "$(grep -cE "^$id $txid( |$)" "$JOURNAL")" 1
+	check "${id:0:8} journaled once, with the ledger txid" eq "$(journaled "$id" "$txid")" 1
 	check "${id:0:8} journaled nowhere else" eq "$(journaled "$id")" 1
 }
 

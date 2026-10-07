@@ -179,9 +179,9 @@ pub async fn claim(
 
 /// Every coin id in the ledger with its txid (for journal reconciliation).
 /// Without the raw tx: every row of a batch stores the whole batch tx.
-pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String)>> {
-	db.query("SELECT vtxo_id, txid FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
-		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?))).collect()
+pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, bool)>> {
+	db.query("SELECT vtxo_id, txid, state = 'confirmed' AS confirmed FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
+		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?, r.try_get("confirmed")?))).collect()
 }
 
 pub async fn raw_tx(db: &Client, txid: &str) -> anyhow::Result<Vec<u8>> {
@@ -196,6 +196,19 @@ pub async fn resurrected(db: &Client, ids: &[String]) -> anyhow::Result<Vec<Stri
 	).await?.into_iter().map(|r| Ok(r.try_get("vtxo_id")?)).collect()
 }
 
+/// A payment journal cannot reconstruct Ark transfers missing from a backup.
+pub async fn check_journal_history(db: &Client, ids: &[String]) -> anyhow::Result<()> {
+	if let Some(row) = db.query_opt("
+		SELECT j.id FROM unnest($1::text[]) AS j(id)
+		LEFT JOIN vtxo v ON v.vtxo_id = j.id
+		WHERE v.vtxo_id IS NULL LIMIT 1
+	", &[&ids]).await? {
+		let id: String = row.try_get("id")?;
+		anyhow::bail!("journaled coin {id} is missing from captaind history; restore a database backup and WAL containing its Ark history before restarting captaind");
+	}
+	Ok(())
+}
+
 pub async fn claimed_payouts(db: &Client) -> anyhow::Result<Vec<Payout>> {
 	let rows = db.query(
 		"SELECT vtxo_id, amount_sat, address FROM sidecar.payout WHERE state = 'claimed' ORDER BY claimed_at",
@@ -206,12 +219,6 @@ pub async fn claimed_payouts(db: &Client) -> anyhow::Result<Vec<Payout>> {
 		amount_sat: r.try_get::<_, i64>("amount_sat")? as u64,
 		address: r.try_get("address")?,
 	})).collect()
-}
-
-/// The stored txs of payouts in `state`, one per txid.
-pub async fn txs_in_state(db: &Client, state: &str) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-	db.query("SELECT DISTINCT txid, raw_tx FROM sidecar.payout WHERE state = $1 AND txid IS NOT NULL", &[&state])
-		.await?.into_iter().map(|r| Ok((r.try_get("txid")?, r.try_get("raw_tx")?))).collect()
 }
 
 /// Store the signed batch tx for these claims before it is broadcast.
@@ -226,10 +233,10 @@ pub async fn mark_signed(db: &mut Client, vtxo_ids: &[String], txid: &str, raw: 
 	Ok(())
 }
 
-pub async fn set_state_by_txid(db: &Client, txid: &str, from: &str, to: &str) -> anyhow::Result<()> {
+pub async fn set_state_by_txid(db: &Client, txid: &str, to: &str) -> anyhow::Result<()> {
 	db.execute(
-		"UPDATE sidecar.payout SET state = $3, updated_at = NOW() WHERE txid = $1 AND state = $2",
-		&[&txid, &from, &to],
+		"UPDATE sidecar.payout SET state = $2, updated_at = NOW() WHERE txid = $1 AND state IN ('signed','broadcast')",
+		&[&txid, &to],
 	).await?;
 	Ok(())
 }

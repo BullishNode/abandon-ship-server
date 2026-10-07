@@ -63,6 +63,7 @@ async fn main() -> anyhow::Result<()> {
 	db::check_tables(&db).await?;
 	let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
 	let mut journal = journal::Journal::open(&cfg.journal_path)?;
+	db::check_journal_history(&db, &journal.ids()).await?;
 
 	loop {
 		// Infrastructure errors are retried next tick; only an invariant
@@ -96,8 +97,11 @@ async fn tick(
 	// coin that is live again in captaind (DB restore) is re-marked spent
 	// before a user can refresh it. Scans the whole journal every tick.
 	let mut unjournaled: BTreeMap<String, Vec<String>> = BTreeMap::new();
-	for (id, txid) in db::paid_ids(db).await? {
-		if !journal.contains(&id) { unjournaled.entry(txid).or_default().push(id) }
+	for (id, txid, confirmed) in db::paid_ids(db).await? {
+		if confirmed { journal.mark_confirmed(&txid); }
+		if !journal.contains(&id) || !journal.has_transaction(&txid) {
+			unjournaled.entry(txid).or_default().push(id);
+		}
 	}
 	for (txid, ids) in unjournaled {
 		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
@@ -105,17 +109,17 @@ async fn tick(
 	for id in db::resurrected(db, &journal.ids()).await? {
 		let flipped = db::reassert_paid(db, &id).await?;
 		warn!(vtxo = %id, flipped, "journaled coin live again in captaind (restore?); re-marked spent");
-		db::quarantine(db, &id, "already paid per local journal").await?;
-		// The restored DB may have lost the tx before it was broadcast: send
-		// the journaled one (a no-op if it is already known or mined).
-		if let Some(raw) = journal.raw_tx(&id) {
-			if let Err(e) = chain.broadcast(raw).await {
-				warn!(vtxo = %id, "journaled payout tx not accepted: {e:#}");
-			}
+		db::quarantine(db, &id, "payout committed in local journal").await?;
+	}
+	// A backup taken after a claim but before signing still has its row.
+	// Reattach its journaled transaction instead of building another payment.
+	for claim in db::claimed_payouts(db).await? {
+		if let Some((txid, raw)) = journal.transaction(&claim.vtxo_id) {
+			db::mark_signed(db, &[claim.vtxo_id], &txid, &raw).await?;
 		}
 	}
 
-	settle_inflight(db, chain).await?;
+	settle_inflight(db, chain, journal).await?;
 
 	// Fee gate: bitcoind's real estimate only, no fallback rate, ever. No
 	// estimate: no claims and no payouts this tick. There is no feerate cap:
@@ -312,7 +316,7 @@ async fn pay_claimed(
 			db::mark_signed(db, &ids, &txid, &built.raw).await?; // persisted before broadcast
 			journal.record(&ids, &txid, &built.raw)?;            // and on local disk
 			chain.broadcast(built.raw).await?;
-			db::set_state_by_txid(db, &txid, "signed", "broadcast").await?;
+			db::set_state_by_txid(db, &txid, "broadcast").await?;
 			info!(%txid, coins = ids.len(), fee = built.fee_sat, "payout broadcast");
 			return Ok(true);
 		}
@@ -320,32 +324,29 @@ async fn pay_claimed(
 	Ok(false)
 }
 
-/// Broadcast stored txs (crash recovery) and mark confirmed ones.
-async fn settle_inflight(db: &mut tokio_postgres::Client, chain: &chain::Chain) -> anyhow::Result<()> {
-	for (txid, raw) in db::txs_in_state(db, "signed").await? {
-		match chain.broadcast(raw).await {
-			Ok(()) => db::set_state_by_txid(db, &txid, "signed", "broadcast").await?,
-			Err(e) => warn!(%txid, "stored payout not accepted; retrying next tick: {e:#}"),
-		}
-	}
-	for (txid, raw) in db::txs_in_state(db, "broadcast").await? {
+/// Retry every journaled transaction until confirmed, including lost DB rows.
+async fn settle_inflight(
+	db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal,
+) -> anyhow::Result<()> {
+	for (txid, raw) in journal.pending_transactions()? {
 		let confs = chain.confirmations(&txid).await.unwrap_or(0);
 		if confs >= 6 {
-			db::set_state_by_txid(db, &txid, "broadcast", "confirmed").await?;
-		} else if confs == 0 {
-			// Evicted from mempools or never relayed: rebroadcast the
-			// stored tx itself. Never build a new one for the same coins.
-			if let Err(e) = chain.broadcast(raw).await {
-				warn!(%txid, "rebroadcast failed: {e:#}");
+			db::set_state_by_txid(db, &txid, "confirmed").await?;
+			journal.mark_confirmed(&txid);
+		} else {
+			if confs == 0 {
+				if let Err(e) = chain.broadcast(raw).await {
+					warn!(%txid, "stored payout not accepted; retrying next tick: {e:#}");
+					continue;
+				}
 			}
+			db::set_state_by_txid(db, &txid, "broadcast").await?;
 		}
 	}
-	// Replay parents before reserving: their change outputs may only become
-	// known after rebroadcast, and can already belong to a stored child tx.
-	for state in ["signed", "broadcast"] {
-		for (_, raw) in db::txs_in_state(db, state).await? {
-			chain.reserve_inputs(&raw).await?;
-		}
+	// A rebroadcast parent may have made its change available this tick.
+	// Reserve it for any still-pending child before building new payouts.
+	for (_, raw) in journal.pending_transactions()? {
+		chain.reserve_inputs(&raw).await?;
 	}
 
 	Ok(())

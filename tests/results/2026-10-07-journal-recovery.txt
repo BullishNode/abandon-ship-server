@@ -1,0 +1,47 @@
+Journal recovery, 2026-10-07
+
+Integrated over main a546f0b; retains149/148 funding behavior and exact fees.
+Immutable recovery-d binary SHA256: 7e3973941948fdd72d574ad9cf65473ee8717863d93b482989eafd49ae8524bc
+Integrated cargo test --locked: 7 PASS / 0 FAIL. Build of stage: PASS.
+
+Before/after failure evidence on abandon-session2:
+- Claimed A / missing B row fixture: before FAIL382s, after PASS176s.
+- Actual pre-claim pg_dump/pg_restore, journal retained, broadcast rejected:
+  before FAIL283s, after PASS218s. Original bytes retried after rejection clears.
+- Backup missing a journaled Ark coin: before FAIL191s, after PASS242s.
+  The pass proves an explicit recovery stop, not settlement without Ark history.
+
+Recovery-d affected run: 6 PASS / 0 FAIL, exit0:
+restore-retry          PASS296s (RESTORE_MODE=postgres: actual dump/restore)
+restore-missing-history PASS148s
+ db-restore            PASS178s (restored row fixture, not pg_restore)
+tamper-payout          PASS248s
+broadcast-rejected    PASS368s
+crash-signed          PASS262s (journal permission failure, not SIGKILL)
+
+The atomic journal unit test checks every truncated prefix of a two-coin
+record, preserves the previous complete record and replaces the partial tail
+before another append. Complete legacy records remain readable.
+
+One original before-run printed PASS256s but is invalid: a failed updated_at
+trigger rolled back fixture setup. Corrected setup exits on SQL failure and
+asserts both restored states before recovery. It is excluded from passing
+counts. Raw artifacts remain retained.
+
+Journal assertion helpers understand complete legacy and comma-separated
+batch records and check exact coin/txid membership. An unrelated partial-exit
+run exposed the old single-ID assertion; the corrected helper retains the
+same once-only requirement.
+
+Artifacts: session2-continuation/oct7-recovery-before-rows-1791406794974318348/,
+oct7-recovery-before-postgres-1791407194339511862/,
+oct7-recovery-after-rows-1791407493016969800/,
+oct7-recovery-after-postgres-1791407685854476683/,
+oct7-history-before-1791407923455743838/,
+oct7-history-after-1791408128942933065/,
+oct7-recovery-d-1791408582481807177/.
+
+Open acceptance work: actual process kill after journal durability; grouped
+reattachment; missing-raw diagnostic; enforced captaind startup ordering. A
+separate candidate covers unfinished restored rounds and one-shot failure
+status. These results do not claim those remaining gates are implemented.
