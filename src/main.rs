@@ -66,10 +66,10 @@ async fn main() -> anyhow::Result<()> {
 	db::check_journal_history(&db, &journal.ids()).await?;
 
 	loop {
-		// Infrastructure errors are retried next tick; only an invariant
-		// violation stops the process.
+		// A one-shot recovery must report failure to its caller. The daemon
+		// retries infrastructure errors; invariant violations stop either mode.
 		if let Err(e) = tick(&cfg, &sweep_spks, &mut db, &chain, &mut journal).await {
-			if e.downcast_ref::<InvariantViolation>().is_some() { return Err(e) }
+			if once || e.downcast_ref::<InvariantViolation>().is_some() { return Err(e) }
 			warn!("tick failed, retrying: {e:#}");
 		}
 		db::check_invariants(&db).await?;

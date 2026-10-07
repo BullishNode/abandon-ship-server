@@ -1,0 +1,82 @@
+Restore startup history and command status — 2026-10-07
+
+Before: recovery-d; restore-startup FAIL / exit 1, 314.3s.
+After: recovery-f; restore-startup PASS / exit 0, 266.3s.
+After cargo test --locked: 7 PASS / 0 FAIL.
+After binary SHA256: dcb3c9bca147248430787859d85619891d158bd3ea31765b57f7ff177ede2bd0
+
+The scenario creates and confirms a real payout, then models an older unfinished round using explicit SQL rows while captaind is stopped. It does not reproduce an interrupted live round. It verifies startup refuses the unfinished history before reasserting the coin; then removes the fixture and verifies that a Core outage makes --once return nonzero. Successful recovery retains the original transaction and a single wallet payment. The current database dump is restored before captaind restarts.
+
+This is not the automatic captaind startup gate. That remains separate work.
+
+before: expected 1; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/oct7-recovery-startup-before-1791410102780043254
+[restore-startup] ok: fixture paid
+ Container abandon-session2-watchmand-1 Stopping 
+ Container abandon-session2-watchmand-1 Stopped 
+ Container abandon-session2-captaind-1 Stopping 
+ Container abandon-session2-captaind-1 Stopped 
+[restore-startup] NOT OK: startup refuses unfinished restored round
+[restore-startup] NOT OK: operator gets offline round recovery action
+[restore-startup]   got 'spent', want 'spendable'
+[restore-startup] NOT OK: refusal precedes rewriting the restored coin
+[restore-startup] ok: original payout bytes survive
+[restore-startup] ok: no extra payment during refused recovery
+[restore-startup] NOT OK: failed one-shot recovery does not report success
+[restore-startup] ok: unreconciled restored coin remains visible
+[restore-startup] ok: recovery succeeds after Core returns
+[restore-startup] ok: recovered coin is excluded before captaind restarts
+[restore-startup] ok: recovery still preserves the original bytes
+[restore-startup] ok: successful recovery adds no second payment
+ Container abandon-session2-bitcoind-1 Waiting 
+ Container abandon-session2-bitcoind-1 Healthy 
+ Container abandon-session2-bitcoind-1 Waiting 
+ Container abandon-session2-postgres-1 Waiting 
+ Container abandon-session2-cln-1 Waiting 
+ Container abandon-session2-postgres-1 Healthy 
+ Container abandon-session2-cln-1 Healthy 
+ Container abandon-session2-bitcoind-1 Healthy 
+ Container abandon-session2-captaind-1 Starting 
+ Container abandon-session2-captaind-1 Started 
+ Container abandon-session2-captaind-1 Waiting 
+ Container abandon-session2-captaind-1 Healthy 
+ Container abandon-session2-watchmand-1 Starting 
+ Container abandon-session2-watchmand-1 Started 
+[restore-startup] ok: every paid coin is spent and nothing else spent it
+[restore-startup] ok: every ledger row with a txid is journaled
+FAIL restore-startup: startup refuses unfinished restored round;operator gets offline round recovery action;refusal precedes rewriting the restored coin;failed one-shot recovery does not report success
+before: exit 1; duration 314.3s
+after: expected 0; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/oct7-recovery-startup-after-1791410417122988331
+[restore-startup] ok: fixture paid
+ Container abandon-session2-watchmand-1 Stopping 
+ Container abandon-session2-watchmand-1 Stopped 
+ Container abandon-session2-captaind-1 Stopping 
+ Container abandon-session2-captaind-1 Stopped 
+[restore-startup] ok: startup refuses unfinished restored round
+[restore-startup] ok: operator gets offline round recovery action
+[restore-startup] ok: refusal precedes rewriting the restored coin
+[restore-startup] ok: original payout bytes survive
+[restore-startup] ok: no extra payment during refused recovery
+[restore-startup] ok: failed one-shot recovery does not report success
+[restore-startup] ok: unreconciled restored coin remains visible
+[restore-startup] ok: recovery succeeds after Core returns
+[restore-startup] ok: recovered coin is excluded before captaind restarts
+[restore-startup] ok: recovery still preserves the original bytes
+[restore-startup] ok: successful recovery adds no second payment
+ Container abandon-session2-bitcoind-1 Waiting 
+ Container abandon-session2-bitcoind-1 Healthy 
+ Container abandon-session2-bitcoind-1 Waiting 
+ Container abandon-session2-postgres-1 Waiting 
+ Container abandon-session2-cln-1 Waiting 
+ Container abandon-session2-cln-1 Healthy 
+ Container abandon-session2-postgres-1 Healthy 
+ Container abandon-session2-bitcoind-1 Healthy 
+ Container abandon-session2-captaind-1 Starting 
+ Container abandon-session2-captaind-1 Started 
+ Container abandon-session2-captaind-1 Waiting 
+ Container abandon-session2-captaind-1 Healthy 
+ Container abandon-session2-watchmand-1 Starting 
+ Container abandon-session2-watchmand-1 Started 
+[restore-startup] ok: every paid coin is spent and nothing else spent it
+[restore-startup] ok: every ledger row with a txid is journaled
+PASS restore-startup
+after: exit 0; duration 266.3s

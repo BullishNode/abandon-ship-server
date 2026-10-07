@@ -46,6 +46,6 @@ The sidecar stops if the schema version changes under it.
 1. Stop captaind and the sidecar.
 2. Restore the DB.
 3. Start the sidecar first, with its journal. On its first tick it re-marks journaled coins that are spendable again as spent, quarantines them, and rebroadcasts their journaled payout tx.
-4. Start captaind only after successful reconciliation. Missing Ark history stops the sidecar: restore the backup/WAL containing the named coin first. A payment journal cannot reconstruct missing transfers.
+4. Start captaind only after successful reconciliation. Missing or conflicting Ark history, including unfinished round participation, stops the sidecar: restore the matching backup/WAL or repair the round offline first. A failed `--once` run exits nonzero and must not authorize starting captaind. A payment journal cannot reconstruct missing transfers.
 
 Restored claimed rows reattach their original journaled transaction. Transactions whose payout rows are absent stay in the journal retry queue. Temporary broadcast rejection retains their funding inputs and does not remove the obligation.

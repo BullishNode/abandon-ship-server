@@ -199,12 +199,23 @@ pub async fn resurrected(db: &Client, ids: &[String]) -> anyhow::Result<Vec<Stri
 /// A payment journal cannot reconstruct Ark transfers missing from a backup.
 pub async fn check_journal_history(db: &Client, ids: &[String]) -> anyhow::Result<()> {
 	if let Some(row) = db.query_opt("
-		SELECT j.id FROM unnest($1::text[]) AS j(id)
+		SELECT j.id, v.vtxo_id IS NULL AS missing
+		FROM unnest($1::text[]) AS j(id)
 		LEFT JOIN vtxo v ON v.vtxo_id = j.id
-		WHERE v.vtxo_id IS NULL LIMIT 1
+		WHERE v.vtxo_id IS NULL OR v.policy_type <> 'pubkey'
+		   OR v.spend_state NOT IN ('spendable', 'unclaimed', 'spent')
+		   OR v.spent_in_round IS NOT NULL OR v.oor_spent_txid IS NOT NULL
+		   OR v.offboarded_in IS NOT NULL OR v.confirmed_height IS NOT NULL
+		   OR EXISTS (SELECT 1 FROM round_part_input i
+		       JOIN round_participation p ON p.id = i.participation_id
+		       WHERE i.vtxo_id = j.id AND p.forfeited_at IS NULL)
+		LIMIT 1
 	", &[&ids]).await? {
 		let id: String = row.try_get("id")?;
-		anyhow::bail!("journaled coin {id} is missing from captaind history; restore a database backup and WAL containing its Ark history before restarting captaind");
+		if row.try_get::<_, bool>("missing")? {
+			anyhow::bail!("journaled coin {id} is missing from captaind history; restore a database backup and WAL containing its Ark history before restarting captaind");
+		}
+		anyhow::bail!("journaled coin {id} has conflicting Ark history or an unfinished round; restore the matching history or repair the round offline before restarting captaind");
 	}
 	Ok(())
 }

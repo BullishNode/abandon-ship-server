@@ -61,16 +61,15 @@ impl Journal {
 	pub fn record(&mut self, ids: &[String], txid: &str, raw: &[u8]) -> anyhow::Result<()> {
 		let hex = bitcoin::hex::DisplayHex::to_lower_hex_string(raw);
 		let record = format!("{} {txid} {hex}\n", ids.join(","));
-		let existed = self.path.exists();
 		let mut file = OpenOptions::new().create(true).append(true).open(&self.path)?;
 		// Also removes an incomplete append from an earlier failed tick.
 		file.set_len(self.complete_len)?;
 		file.write_all(record.as_bytes())?;
 		file.sync_all()?;
-		if !existed {
-			let parent = self.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-			File::open(parent)?.sync_all()?;
-		}
+		// Repeat this after a failed append too: an existing file may have
+		// been created by an earlier write whose directory sync failed.
+		let parent = self.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+		File::open(parent)?.sync_all()?;
 		self.complete_len += record.len() as u64;
 		for id in ids { self.paid.insert(id.clone(), txid.to_owned()); }
 		self.raw.insert(txid.to_owned(), hex);
