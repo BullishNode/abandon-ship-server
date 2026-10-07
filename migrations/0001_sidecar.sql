@@ -31,3 +31,9 @@ CREATE TABLE IF NOT EXISTS sidecar.payout (
 	updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS payout_state_ix ON sidecar.payout (state);
+
+-- Completed full journal reassertion, used by captaind's startup gate.
+CREATE TABLE IF NOT EXISTS sidecar.reassert (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	completed_at TIMESTAMPTZ NOT NULL
+);

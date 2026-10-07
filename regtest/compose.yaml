@@ -43,6 +43,8 @@ services:
     image: secondark/captaind@sha256:9414f43b7de5ce4a806380d6ece719f73c8c1167ad2f40ccbd0ba6e30789c292
     environment:
       CAPTAIND_LOG: info
+      # Scenarios drive the sidecar manually. restore-gate tests the real gate.
+      ABANDON_SHIP_SKIP_REASSERT_WAIT: "1"
     entrypoint: [/bin/sh, /scripts/start-captaind.sh]
     volumes:
       - captaind:/data/captaind

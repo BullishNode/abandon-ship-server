@@ -6,16 +6,15 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 
 ## Flow (one tick)
 
-1. **Checks.**
-   - captaind schema version is allowlisted;
-   - the payout wallet is loaded;
-   - `estimatesmartfee` returns a rate before new claims or transactions. Stored payouts retry even without an estimate.
+1. **Schema check.** Captaind's schema version must be allowlisted.
 2. **Journal reconciliation.**
-   - every paid ledger row is in the journal;
-   - a journaled coin that is spendable again in captaind (DB restore) is set back to spent, quarantined, and its journaled payout tx is broadcast again (a no-op if already known).
-3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
+   - every paid ledger row and its signed transaction are in the journal;
+   - missing or conflicting Ark history stops recovery;
+   - restored live coins are set back to spent, and restored claims reattach the original transaction as a batch;
+   - after ledger checks, write the marker used by captaind's startup gate. This pass needs no Core connection.
+3. **Settle.** Check the payout wallet and tip, retry stored transactions, and mark transactions with 6 confirmations as confirmed. Then require a real fee estimate before new claims or transactions.
 4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat` and affordable at the current rate (both filtered before the candidate limit), not paid, not quarantined. Existing claims are attempted first. Claims deferred by actual fees or funding leave room for new claims.
-5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
+5. **Per coin.** Invalid coin data is quarantined. Infrastructure errors abort the tick; exceeding the quarantine limit stops the process.
    1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
    2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
    3. **Sweep.** Validate the coin's exit path against its anchor transaction. A transaction buried `sweep_min_confs` must spend an exact outpoint on that path and pay only the configured `sweep_addresses` (ignoring OP_RETURN and P2A). Sweeping a sibling does not qualify this coin.

@@ -7,7 +7,7 @@ mod config;
 mod db;
 mod journal;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -74,7 +74,6 @@ async fn main() -> anyhow::Result<()> {
 	db.execute("DELETE FROM sidecar.quarantine WHERE reason LIKE 'round partially unrolled by %'", &[]).await?;
 	let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
 	let mut journal = journal::Journal::open(&cfg.journal_path)?;
-	db::check_journal_history(&db, &journal.ids()).await?;
 
 	loop {
 		// A one-shot recovery must report failure to its caller. The daemon
@@ -107,44 +106,11 @@ async fn tick(
 	if !cfg.postgres.allowed_schema_versions.contains(&ver) {
 		return Err(InvariantViolation(format!("captaind schema version {ver} not in allowed_schema_versions")).into());
 	}
+	reconcile_journal(db, journal, stats).await?;
 	chain.check_wallet().await?;
 	let tip = chain.tip().await?;
 	stats.tip = Some(tip);
 
-	// Journal first: any ledger row with a txid must be journaled (closes the
-	// crash window between storing a tx and journaling it), and any journaled
-	// coin that is live again in captaind (DB restore) is re-marked spent
-	// before a user can refresh it. Scans the whole journal every tick.
-	let mut unjournaled: BTreeMap<String, Vec<String>> = BTreeMap::new();
-	for (id, txid, confirmed) in db::paid_ids(db).await? {
-		if confirmed { journal.mark_confirmed(&txid); }
-		if !journal.contains(&id) || !journal.has_transaction(&txid) {
-			unjournaled.entry(txid).or_default().push(id);
-		}
-	}
-	for (txid, ids) in unjournaled {
-		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
-	}
-	journal.check_transactions().map_err(|e| InvariantViolation(e.to_string()))?;
-	for id in db::resurrected(db, &journal.ids()).await? {
-		let flipped = db::reassert_paid(db, &id).await?;
-		warn!(vtxo = %id, flipped, "journaled coin live again in captaind (restore?); re-marked spent");
-		db::quarantine(db, &id, "payout committed in local journal").await?;
-		stats.quarantines += 1;
-	}
-	// A backup taken after a claim but before signing still has its row.
-	// Reattach its journaled transaction instead of building another payment.
-	let mut restored: BTreeMap<String, Vec<String>> = BTreeMap::new();
-	for claim in db::claimed_payouts(db).await? {
-		if let Some(txid) = journal.txid(&claim.vtxo_id) {
-			restored.entry(txid.to_owned()).or_default().push(claim.vtxo_id);
-		}
-	}
-	for (txid, ids) in restored {
-		let raw = journal.raw_tx(&ids[0]).ok_or_else(|| InvariantViolation(format!(
-			"journaled coins {ids:?}, payout {txid}: unreadable raw transaction")))?;
-		db::mark_signed(db, &ids, &txid, &raw).await?;
-	}
 
 	settle_inflight(db, chain, journal, stats).await?;
 
@@ -189,6 +155,59 @@ async fn tick(
 	}
 
 	pay_claimed(cfg, db, chain, journal, fee_rate, stats).await?;
+	Ok(())
+}
+
+/// Reassert settlement before any chain access. The startup gate observes
+/// the marker only after the complete journal pass and ledger checks succeed.
+async fn reconcile_journal(
+	db: &mut tokio_postgres::Client, journal: &mut journal::Journal, stats: &mut TickStats,
+) -> anyhow::Result<()> {
+	// Journal first: any ledger row with a txid must be journaled (closes the
+	// crash window between storing a tx and journaling it), and any journaled
+	// coin that is live again in captaind (DB restore) is re-marked spent
+	// before a user can refresh it. Scans the whole journal every tick.
+	let mut unjournaled: BTreeMap<String, Vec<String>> = BTreeMap::new();
+	let mut pending_txids = HashSet::new();
+	for (id, txid, confirmed) in db::paid_ids(db).await? {
+		if confirmed { journal.mark_confirmed(&txid); }
+		else { pending_txids.insert(txid.clone()); }
+		if !journal.contains(&id) || !journal.has_transaction(&txid) {
+			unjournaled.entry(txid).or_default().push(id);
+		}
+	}
+	for (txid, ids) in unjournaled {
+		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
+	}
+	db::check_journal_history(db, &journal.ids()).await
+		.map_err(|e| InvariantViolation(e.to_string()))?;
+	journal.check_transactions().map_err(|e| InvariantViolation(e.to_string()))?;
+	for id in db::resurrected(db, &journal.ids()).await? {
+		let flipped = db::reassert_paid(db, &id).await?;
+		warn!(vtxo = %id, flipped, "journaled coin live again in captaind (restore?); re-marked spent");
+		db::quarantine(db, &id, "payout committed in local journal").await?;
+		stats.quarantines += 1;
+	}
+	// A backup taken after a claim but before signing still has its row.
+	// Reattach its journaled transaction instead of building another payment.
+	let mut restored: BTreeMap<String, Vec<String>> = BTreeMap::new();
+	for claim in db::claimed_payouts(db).await? {
+		if let Some(txid) = journal.txid(&claim.vtxo_id) {
+			restored.entry(txid.to_owned()).or_default().push(claim.vtxo_id);
+		}
+	}
+	for (txid, ids) in restored {
+		let raw = journal.raw_tx(&ids[0]).ok_or_else(|| InvariantViolation(format!(
+			"journaled coins {ids:?}, payout {txid}: unreadable raw transaction")))?;
+		db::mark_signed(db, &ids, &txid, &raw).await?;
+		pending_txids.insert(txid);
+	}
+	// One confirmed row must not hide another restored member of its batch.
+	for txid in pending_txids { journal.mark_pending(&txid); }
+
+	db::check_invariants(db).await?;
+	db.execute("INSERT INTO sidecar.reassert (id, completed_at) VALUES (1, clock_timestamp())
+		ON CONFLICT (id) DO UPDATE SET completed_at = EXCLUDED.completed_at", &[]).await?;
 	Ok(())
 }
 

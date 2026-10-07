@@ -41,7 +41,7 @@ pub async fn captaind_schema_version(db: &Client) -> anyhow::Result<i32> {
 /// The sidecar does not create its tables: `migrations/0001_sidecar.sql`
 /// is applied once at setup (docs/deployment.md).
 pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
-	for t in ["sidecar.ban", "sidecar.quarantine", "sidecar.payout"] {
+	for t in ["sidecar.ban", "sidecar.quarantine", "sidecar.payout", "sidecar.reassert"] {
 		let ok: bool = db.query_one("SELECT to_regclass($1) IS NOT NULL AS ok", &[&t]).await?.try_get("ok")?;
 		anyhow::ensure!(ok, "table {t} missing: apply migrations/0001_sidecar.sql");
 	}

@@ -1,0 +1,226 @@
+Restore ordering and mixed-batch recovery — 2026-10-07
+
+Combined main candidate (base a502c32 plus this commit):
+SHA256 cd5fb185e576bde78e7bcee891f76767bf4028b5730bc14ca2270c0a9d3b9203
+cargo test --locked: 10 PASS / 0 FAIL; locked build PASS.
+restore-startup PASS / exit0 / 102.4s
+restore-mixed-batch PASS / exit0 / 127.6s
+restore-gate PASS / exit0 / 174.6s
+
+Mixed-batch regression before recovery-g FAIL / exit1 / 108.1s;
+after recovery-h PASS / exit0 / 105.0s. This is a partial-row restore fixture
+around a real confirmed transaction, not a full PostgreSQL restore.
+
+The gate scenario does restore an actual pre-claim PostgreSQL dump, starts
+captaind before reconciliation, and verifies a stale marker cannot open its
+listener. A fresh pass reasserts the spent coin first. The CLI creates no
+replacement round; no extra payout occurs. With Core actually stopped, DB
+reassertion still releases the gate, although stock captaind separately needs
+Core for its own startup. After Core returns, original bytes/payment survive.
+The marker is not evidence that the payment portion of a tick completed.
+
+Gate scripts in the isolated compose override are byte-identical to the newly
+installed scripts. Ordinary manually ticked regtests explicitly bypass the
+gate. Both private stacks were recreated with that override after these tests.
+The foreign deployment worktree and signet VM were not changed. Deployment
+compose wiring and its own regression rehearsal are still pending.
+
+Earlier eight-assertion shell/SQL probe passed: fresh empty history, missing
+schema with nonempty journal, stale marker, fresh release, missing journal,
+override warning, existing history with empty journal, subsequent start marker.
+Those were gate-process tests, not captaind restart tests.
+
+
+Mixed-batch before/after:
+before: expected 1; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/mixed-batch-before-1791412935240225065
+[restore-mixed-batch] ok: both fixture coins paid
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-mixed-batch] ok: mixed batch recovery tick succeeds
+[restore-mixed-batch]   got 'signed', want 'confirmed'
+[restore-mixed-batch] NOT OK: restored member confirms despite confirmed peer
+[restore-mixed-batch] ok: confirmed peer stays confirmed
+[restore-mixed-batch] ok: restored member retains original txid
+[restore-mixed-batch] ok: restored member retains original journal bytes
+[restore-mixed-batch] ok: A received once
+[restore-mixed-batch] ok: B received once
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-mixed-batch] ok: every paid coin is spent and nothing else spent it
+[restore-mixed-batch] ok: every ledger row with a txid is journaled
+FAIL restore-mixed-batch: restored member confirms despite confirmed peer
+before: exit 1; duration 108.1s
+after: expected 0; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/mixed-batch-after-1791413043310995382
+[restore-mixed-batch] ok: both fixture coins paid
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-mixed-batch] ok: mixed batch recovery tick succeeds
+[restore-mixed-batch] ok: restored member confirms despite confirmed peer
+[restore-mixed-batch] ok: confirmed peer stays confirmed
+[restore-mixed-batch] ok: restored member retains original txid
+[restore-mixed-batch] ok: restored member retains original journal bytes
+[restore-mixed-batch] ok: A received once
+[restore-mixed-batch] ok: B received once
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-mixed-batch] ok: every paid coin is spent and nothing else spent it
+[restore-mixed-batch] ok: every ledger row with a txid is journaled
+PASS restore-mixed-batch
+after: exit 0; duration 105.0s
+EXIT 0
+
+Combined main scenarios:
+restore-startup: artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/recovery-main-h-restore-startup-1791413214180879647
+[restore-startup] ok: fixture paid
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-startup] ok: startup refuses unfinished restored round
+[restore-startup] ok: operator gets offline round recovery action
+[restore-startup] ok: refusal precedes rewriting the restored coin
+[restore-startup] ok: original payout bytes survive
+[restore-startup] ok: no extra payment during refused recovery
+[restore-startup] ok: failed one-shot recovery does not report success
+[restore-startup] ok: reassertion precedes the failed Core check
+[restore-startup] ok: recovery succeeds after Core returns
+[restore-startup] ok: recovered coin is excluded before captaind restarts
+[restore-startup] ok: recovery still preserves the original bytes
+[restore-startup] ok: successful recovery adds no second payment
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-startup] ok: every paid coin is spent and nothing else spent it
+[restore-startup] ok: every ledger row with a txid is journaled
+PASS restore-startup
+restore-startup: exit 0; duration 102.4s
+restore-mixed-batch: artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/recovery-main-h-restore-mixed-batch-1791413316599203590
+[restore-mixed-batch] ok: both fixture coins paid
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-mixed-batch] ok: mixed batch recovery tick succeeds
+[restore-mixed-batch] ok: restored member confirms despite confirmed peer
+[restore-mixed-batch] ok: confirmed peer stays confirmed
+[restore-mixed-batch] ok: restored member retains original txid
+[restore-mixed-batch] ok: restored member retains original journal bytes
+[restore-mixed-batch] ok: A received once
+[restore-mixed-batch] ok: B received once
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-mixed-batch] ok: every paid coin is spent and nothing else spent it
+[restore-mixed-batch] ok: every ledger row with a txid is journaled
+PASS restore-mixed-batch
+restore-mixed-batch: exit 0; duration 127.6s
+restore-gate: artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/recovery-main-h-restore-gate-1791413444182374893
+NOTICE:  relation "reassert" already exists, skipping
+[restore-gate] ok: fixture paid
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+ Container abandon-verify-captaind-1 Recreate 
+ Container abandon-verify-captaind-1 Recreated 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+[restore-gate] ok: captaind waits despite a restored marker
+[restore-gate] ok: captaind has not opened its admin service
+[restore-gate] ok: reconciliation succeeds with captaind waiting
+[restore-gate] ok: coin excluded before serving clients
+[restore-gate] ok: captaind starts after the fresh pass
+[restore-gate] ok: startup reports fresh reconciliation
+[restore-gate] ok: owner gets no replacement round after restart
+[restore-gate] ok: original payout remains the only payment
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+ Container abandon-verify-bitcoind-1 Stopping 
+ Container abandon-verify-bitcoind-1 Stopped 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+[restore-gate] ok: Core outage still reports the failed payment tick
+[restore-gate] ok: reassertion completes without Core
+[restore-gate] ok: Core outage does not hold the reassert gate
+ Container abandon-verify-bitcoind-1 Starting 
+ Container abandon-verify-bitcoind-1 Started 
+[restore-gate] ok: captaind becomes healthy after Core returns
+[restore-gate] ok: outage recovery preserves original signed bytes
+[restore-gate] ok: outage recovery does not duplicate payout
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+ Container abandon-verify-captaind-1 Recreate 
+ Container abandon-verify-captaind-1 Recreated 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-gate] ok: every paid coin is spent and nothing else spent it
+[restore-gate] ok: every ledger row with a txid is journaled
+PASS restore-gate
+restore-gate: exit 0; duration 174.6s
+EXIT 0

@@ -60,7 +60,7 @@ p.write_text(text)
 PY
 RC=0; tick || RC=$?
 check "failed one-shot recovery does not report success" test "$RC" -ne 0
-check "unreconciled restored coin remains visible" eq "$(spend_state "$X")" spendable
+check "reassertion precedes the failed Core check" eq "$(spend_state "$X")" spent
 cp "$LOG/reachable.toml" "$CFG"
 RC=0; tick || RC=$?
 check "recovery succeeds after Core returns" eq "$RC" 0
