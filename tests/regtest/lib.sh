@@ -250,6 +250,34 @@ paid_to() {
 t=json.load(sys.stdin); print(sum(round(o['value']*1e8) for o in t['vout'] if o['scriptPubKey'].get('address')=='$2'))"
 }
 
+# Check the complete batch before confirming it, including shared-key outputs.
+assert_payout_fee() {
+	local txid=$1
+	btc getrawtransaction "$txid" 1 > "$LOG/fee-transaction.json" || exit 2
+	btc getmempoolentry "$txid" > "$LOG/fee-mempool.json" || exit 2
+	q "SELECT json_agg(p) FROM (SELECT address,sum(amount_sat) AS gross FROM sidecar.payout
+		WHERE txid='$txid' GROUP BY address) p" > "$LOG/fee-entitlements.json" || exit 2
+	check "recipients cover the entire mining fee, operator pays zero" python3 - "$LOG" <<'PY'
+import json, sys
+from decimal import Decimal
+from pathlib import Path
+p = Path(sys.argv[1])
+def read(name):
+    return json.loads((p / name).read_text(), parse_float=Decimal)
+tx = read('fee-transaction.json')
+deducted = 0
+for entitlement in read('fee-entitlements.json'):
+    outputs = [o for o in tx['vout'] if o['scriptPubKey'].get('address') == entitlement['address']]
+    assert len(outputs) == 1
+    net = int(outputs[0]['value'] * 100_000_000)
+    assert net <= entitlement['gross']
+    deducted += entitlement['gross'] - net
+fee = int(read('fee-mempool.json')['fees']['base'] * 100_000_000)
+assert deducted == fee, (deducted, fee)
+print(f'recipient deductions={deducted} sat; mining fee={fee} sat; operator fee=0 sat')
+PY
+}
+
 # coininfo <wallet> <id>: "<user_pubkey> <amount_sat>" from the wallet's view.
 # Read it before the payout: a later sync may drop the coin from the list.
 coininfo() {

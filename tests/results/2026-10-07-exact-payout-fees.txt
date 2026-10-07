@@ -1,0 +1,62 @@
+Exact recipient payout fees, 2026-10-07
+
+The payout verifier requires total recipient deductions to equal the complete
+mining fee reported by Core. Each output still passes the existing percentage,
+dust and expected-script checks. No payout mining fee is paid from operator
+change, and recipient deductions cannot exceed the mining fee.
+
+New unit regression against unchanged checks.rs: 0 PASS / 1 expected FAIL,
+exit101 (a fully subsidized payout was accepted). With the fix: full cargo suite
+5 PASS / 0 FAIL, exit0. Also checks overcharging and an odd fee split.
+
+Affected live scenarios on the isolated abandon-session2 stack using the staged
+fee invariant and independent Core mempool/entitlement observations:
+- happy-single: PASS178s. Recipient deductions479 sat = mining fee479 sat.
+- happy-batch: PASS143s. Recipient deductions749 sat = mining fee749 sat.
+- shared-address: PASS183s. Recipient deductions725 sat = mining fee725 sat.
+Operator payout mining fee: zero in each case. Three cases, not six: the runner
+prints its final table twice. This is not a complete final-feature suite.
+
+Artifacts: session2-continuation/oct7-payout-fees-1791401975978510393/.
+The integrated unit before/after logs follow.
+
+
+BEFORE
+   Compiling abandon-ship-server v0.1.0 (/home/francis/abandon-ship-server-main)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.07s
+     Running unittests src/main.rs (target/debug/deps/abandon_ship_server-2b490714e97dbbef)
+
+running 1 test
+test checks::tests::recipients_cover_exactly_the_payout_fee ... FAILED
+
+failures:
+
+---- checks::tests::recipients_cover_exactly_the_payout_fee stdout ----
+
+thread 'checks::tests::recipients_cover_exactly_the_payout_fee' (4064615) panicked at src/checks.rs:135:9:
+assertion failed: verify_payout(&tx(vec![(spk(1), 10_000), (spk(2), 20_000)]), &exp, 300,
+        20).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    checks::tests::recipients_cover_exactly_the_payout_fee
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--bin abandon-ship-server`
+
+AFTER
+   Compiling abandon-ship-server v0.1.0 (/home/francis/abandon-ship-server-main)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.95s
+     Running unittests src/main.rs (target/debug/deps/abandon_ship_server-2b490714e97dbbef)
+
+running 5 tests
+test checks::tests::affordability ... ok
+test checks::tests::payout_verification ... ok
+test checks::tests::sweep_only_to_sweep_scripts ... ok
+test checks::tests::recipients_cover_exactly_the_payout_fee ... ok
+test journal::tests::survives_reopen ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

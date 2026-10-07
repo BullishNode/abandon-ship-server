@@ -16,7 +16,7 @@
 | 4 | Fees or selection block eligible payouts indefinitely | No estimate: no claims, no payouts (no fallback rate). Per-coin rule: pay only if the fee share is ≤ `max_fee_pct_per_payout` and the coin ≥ `min_payout_sat`; smaller coins and coins unaffordable at the current rate are filtered before the candidate limit. A coin that cannot be processed waits or is quarantined alone; a burst of quarantines stops the process (one partially unrolled round counts once). Safe unlocked payout inputs are selected largest first. Existing claims get the first payment attempt; a batch failing its actual fee or funding check is reduced, and deferred claims do not block new claims | `fee-pct-rule`, `fee-no-estimate`, `circuit-breaker`, `happy-batch`, `fee-stuck-claim`, `fee-window`, `fee-fragmented`, `fee-fragmented-progress`, `exit-breaker` |
 | 5 | A restored wallet cannot find or spend its payouts | Payout to BIP86 `tr(coin key)`, derivable from the seed; the bark fork adopts the spent state, finds the payout and sweeps it | `web-journey`, `unclaimed-delegated` |
 
-Process: one instance (Postgres advisory lock); the captaind schema version is allowlisted and checked every tick; the payout tx is verified (outputs, amounts, fee share, change ours) before it is stored.
+Process: one instance (Postgres advisory lock); the captaind schema version is allowlisted and checked every tick; the payout tx is verified (outputs, amounts, fee share, recipient deductions equal the full mining fee, change ours) before it is stored.
 
 ## Limitations
 

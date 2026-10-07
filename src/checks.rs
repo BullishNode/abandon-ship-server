@@ -53,6 +53,7 @@ pub fn is_sweep(spender: &Transaction, sweep_spks: &[ScriptBuf]) -> bool {
 /// - every expected script gets exactly one output, worth at most the expected
 ///   amount and at least expected minus the whole fee;
 /// - every output's fee share is within `max_fee_pct` and leaves dust;
+/// - the recipients' deductions sum to the entire transaction fee;
 /// - at most one other output (change), which the caller checks is ours.
 ///
 /// Returns the change output's script, if any.
@@ -70,6 +71,7 @@ pub fn verify_payout(
 		anyhow::ensure!(want.insert(spk, *amt).is_none(), "duplicate payout script");
 	}
 	let mut change = None;
+	let mut deducted = 0;
 	for o in &tx.output {
 		match want.remove(&o.script_pubkey) {
 			Some(amt) => {
@@ -78,6 +80,7 @@ pub fn verify_payout(
 					"output {v} for expected {amt} outside fee bound");
 				anyhow::ensure!(affordable(amt, amt - v, max_fee_pct),
 					"output {v} for expected {amt}: fee share above {max_fee_pct}% or below dust");
+				deducted += amt - v;
 			},
 			None => {
 				anyhow::ensure!(change.is_none(), "more than one unexpected output");
@@ -86,6 +89,8 @@ pub fn verify_payout(
 		}
 	}
 	anyhow::ensure!(want.is_empty(), "{} expected output(s) missing", want.len());
+	anyhow::ensure!(deducted == fee_sat,
+		"payout deductions {deducted} do not equal transaction fee {fee_sat}");
 	Ok(change)
 }
 
@@ -126,6 +131,17 @@ mod tests {
 		assert!(is_sweep(&tx(vec![(sweep.clone(), 1000), (p2a.clone(), 0)]), std::slice::from_ref(&sweep)));
 		assert!(!is_sweep(&tx(vec![(sweep.clone(), 1000), (spk(2), 500)]), std::slice::from_ref(&sweep)));
 		assert!(!is_sweep(&tx(vec![(p2a, 0)]), &[sweep]));
+	}
+
+	#[test]
+	fn recipients_cover_exactly_the_payout_fee() {
+		let exp = vec![(spk(1), 10_000), (spk(2), 20_000)];
+		// The operator must not subsidize the fee from its change.
+		assert!(verify_payout(&tx(vec![(spk(1), 10_000), (spk(2), 20_000)]), &exp, 300, 20).is_err());
+		// Nor may the recipients lose more than the transaction costs.
+		assert!(verify_payout(&tx(vec![(spk(1), 9_800), (spk(2), 19_800)]), &exp, 300, 20).is_err());
+		// An odd fee leaves a one-satoshi difference between deductions.
+		assert!(verify_payout(&tx(vec![(spk(1), 9_849), (spk(2), 19_850)]), &exp, 301, 20).is_ok());
 	}
 
 	#[test]

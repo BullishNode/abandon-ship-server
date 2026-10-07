@@ -137,7 +137,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | 95 | User keeps coins just above `min_payout` with a high-fee batch so their output goes below dust | Bitcoind refuses → batch stuck → must not block others | fixed (as #34) |
 | 96 | Operator `max_fee_pct_per_payout` too low during congestion → payouts deferred indefinitely | Alert; operator raises the cap | todo |
 | 97 | Unrolled-round griefing: one exit quarantines a whole round's payouts | Accepted: manual review queue | todo |
-| 98 | User requests nothing; the operator still pays the batch fee share? | No: subtract-fee-from-outputs | todo |
+| 98 | The operator pays part of a payout mining fee or recipients are overcharged | Recipient deductions must equal the full mining fee | fixed (`happy-single`, `happy-batch`, `shared-address`, unit regression) |
 | 100 | Change output from the payout wallet reused across batches (wallet address reuse) | bitcoind generates fresh change | todo |
 
 ## Batch 11: "Humans and deployment" (misconfiguration, supply chain)

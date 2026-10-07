@@ -17,6 +17,7 @@ expire_and_sweep "${IDS[*]}" || finish
 
 check "both paid within 3 ticks" pay_until "${IDS[*]}" 3
 TXID=$(payout_txid "${IDS[0]}")
+assert_payout_fee "$TXID"
 check "same payout tx" eq "$(payout_txid "${IDS[1]}")" "$TXID"
 TRA=$(tr_address "$PK1")
 N=$(btc getrawtransaction "$TXID" 1 | python3 -c "import json,sys

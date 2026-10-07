@@ -10,6 +10,7 @@ check "paid within 3 ticks" pay_until "$X" 3
 assert_paid "$X" "$PK" "$AMT"
 
 TXID=$(payout_txid "$X")
+assert_payout_fee "$TXID"
 EST=$(btc estimatesmartfee 6 | python3 -c "import json,sys;print(json.load(sys.stdin)['feerate']*1e5)")
 RATE=$(btc getmempoolentry "$TXID" | python3 -c "import json,sys;e=json.load(sys.stdin);print(e['fees']['base']*1e8/e['vsize'])")
 check "payout feerate $RATE = estimate $EST (sat/vB)" python3 -c "import sys; sys.exit(abs($RATE-$EST) > 0.02*$EST)"
