@@ -1,0 +1,15 @@
+Sweep-funded payout — 2026-10-07
+
+Scenario sweep-funding: PASS 78.954s, exit0.
+Observation 20261007T234942-758916cf, isolated abandon-verify.
+Frozen binary: 331939a5645e675ea4908a482b213a8a0f17c992ae65c88d1bae63fa17b14216.
+All existing unlocked payout inputs were reserved by the scenario. watchmand
+swept to a new payout-wallet address. A 59520-sat entitlement paid 58793 sat;
+every funding input of that payment came from the new sweep address.
+No payout-wallet top-up occurred during the case. Original watchman config
+and this scenario's reservations were restored, with no volume deletion.
+
+This is one payout-funding cycle. It does not prove rounds-wallet capital
+recycling, unlimited funding sufficiency, or that sweep fees are always
+covered by operator-funded tree padding. A/B have no automatic return path.
+The four-way no-top-up liquidity comparison remains open.

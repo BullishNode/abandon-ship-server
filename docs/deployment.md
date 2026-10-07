@@ -20,7 +20,8 @@ The connection has no TLS. Run the sidecar on the Postgres host, or reach Postgr
 - **Wallets.** Point the RPC URL at the loaded `payout` wallet (`/wallet/payout`). Other Core wallets may be loaded; captaind and watchmand use their own internal wallets.
 - **Wallet loading.** Create it with `load_on_startup=true`. The sidecar checks it every tick.
 - **Indexes.** `txindex=1`.
-- **Float.** Keep it small; top it up from the watchman sweep address.
+- **Sweep funding.** Set watchmand’s `sweep_address` to an address owned by `payout`, and include it in `policy.sweep_addresses`. Keep old sweep addresses configured while they still back unpaid entitlements. `sweep-funding` verifies one payout funded solely from new sweep proceeds.
+- **Capital recycling.** All swept value lands in `payout`, including forfeited server capital. This sidecar does not return that capital to captaind’s rounds wallet. The operator must recycle the server-owned share while retaining unpaid user obligations. Sweep fees can also leave a funding deficit. Routing alone does not establish a self-sustaining rounds wallet.
 - **RPC.** The node's normal RPC credentials.
 
 ## Process
