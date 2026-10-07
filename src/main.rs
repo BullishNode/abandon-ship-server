@@ -125,6 +125,7 @@ async fn tick(
 	for (txid, ids) in unjournaled {
 		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
 	}
+	journal.check_transactions().map_err(|e| InvariantViolation(e.to_string()))?;
 	for id in db::resurrected(db, &journal.ids()).await? {
 		let flipped = db::reassert_paid(db, &id).await?;
 		warn!(vtxo = %id, flipped, "journaled coin live again in captaind (restore?); re-marked spent");
@@ -133,10 +134,16 @@ async fn tick(
 	}
 	// A backup taken after a claim but before signing still has its row.
 	// Reattach its journaled transaction instead of building another payment.
+	let mut restored: BTreeMap<String, Vec<String>> = BTreeMap::new();
 	for claim in db::claimed_payouts(db).await? {
-		if let Some((txid, raw)) = journal.transaction(&claim.vtxo_id) {
-			db::mark_signed(db, &[claim.vtxo_id], &txid, &raw).await?;
+		if let Some(txid) = journal.txid(&claim.vtxo_id) {
+			restored.entry(txid.to_owned()).or_default().push(claim.vtxo_id);
 		}
+	}
+	for (txid, ids) in restored {
+		let raw = journal.raw_tx(&ids[0]).ok_or_else(|| InvariantViolation(format!(
+			"journaled coins {ids:?}, payout {txid}: unreadable raw transaction")))?;
+		db::mark_signed(db, &ids, &txid, &raw).await?;
 	}
 
 	settle_inflight(db, chain, journal, stats).await?;

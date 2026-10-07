@@ -1,0 +1,166 @@
+Actual pre-broadcast kill and restored batch recovery — 2026-10-07
+
+Before recovery-f: restore-kill FAIL / exit1, 252.2s.
+After recovery-g: restore-kill PASS / exit0, 249.4s.
+Integrated cargo test --locked: 9 PASS / 0 FAIL.
+
+Before SHA256 dcb3c9bca147248430787859d85619891d158bd3ea31765b57f7ff177ede2bd0
+After SHA256 42861a8f14d917231e597a197184191e681522ad6d86454d2eda973d2e718286
+
+The scenario SIGKILLed the actual sidecar after journal fsync while a forwarding
+proxy held sendrawtransaction before Core received it. It restored an actual
+post-claim pg_dump, checked the original raw bytes, and blocked one batch row
+in Postgres to observe atomic reattachment. Before the change the first member
+committed alone; after it no member committed until the complete batch could.
+The missing-raw diagnostic now names both the entitlement and transaction.
+After broadcast/confirmation, the same backup was restored again; both claims
+confirmed without another payment. An unrelated new coin then paid normally.
+This validates recovery with the independent journal retained, not recovery
+when every durable copy of a signed transaction is lost.
+
+Earlier attempts exited2 because of the proxy HTTP version and a reused test
+wallet name. They are retained in the local evidence and are not passing runs.
+The frozen recovery-g predates the independently tested partial-path and logging
+changes now on main. Final combined regression qualification is still pending.
+No volumes were wiped. No mainnet or signet operations were performed.
+
+before: expected 1; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/recovery-kill-before-1791411682251122935
+[restore-kill] ok: both coins claimed without signing
+[restore-kill] ok: sidecar actually killed with SIGKILL
+[restore-kill] ok: batch journal fsynced before the intercepted send
+[restore-kill] ok: both coins share the signed transaction
+[restore-kill] ok: killed transaction never reached Core
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-kill] ok: missing raw transaction stops recovery
+[restore-kill] NOT OK: missing raw diagnostic names the payment
+[restore-kill] ok: missing raw diagnostic names a batch coin
+[restore-kill] ok: recovery reached the held row
+[restore-kill]   got 'signed', want 'claimed'
+[restore-kill] NOT OK: no batch member commits ahead of the held row
+[restore-kill] ok: recovery completes after releasing the row
+[restore-kill] ok: A reattached to original transaction
+[restore-kill] ok: B reattached to original transaction
+[restore-kill] ok: original bytes broadcast after recovery
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-kill] ok: both recovered claims confirmed
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-kill] ok: already-mined transaction reconciles without failure
+[restore-kill] ok: already-mined claims confirmed immediately
+[restore-kill] ok: A received only one transaction
+[restore-kill] ok: B received only one transaction
+[restore-kill] ok: A retains original journal bytes
+[restore-kill] ok: B retains original journal bytes
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-kill] ok: unrelated new coin still pays
+[restore-kill] ok: ec423eba has a payout tx
+[restore-kill] ok: ec423eba payout address = tr(user key)
+[restore-kill] ok: ec423eba output within fee share of 59520 (got 58797)
+[restore-kill] ok: ec423eba spent in captaind
+[restore-kill] ok: ec423eba journaled once, with the ledger txid
+[restore-kill] ok: ec423eba journaled nowhere else
+[restore-kill] ok: every paid coin is spent and nothing else spent it
+[restore-kill] ok: every ledger row with a txid is journaled
+FAIL restore-kill: missing raw diagnostic names the payment;no batch member commits ahead of the held row
+before: exit 1; duration 252.2s
+after: expected 0; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/recovery-kill-after-1791411938595498686
+[restore-kill] ok: both coins claimed without signing
+[restore-kill] ok: sidecar actually killed with SIGKILL
+[restore-kill] ok: batch journal fsynced before the intercepted send
+[restore-kill] ok: both coins share the signed transaction
+[restore-kill] ok: killed transaction never reached Core
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-kill] ok: missing raw transaction stops recovery
+[restore-kill] ok: missing raw diagnostic names the payment
+[restore-kill] ok: missing raw diagnostic names a batch coin
+[restore-kill] ok: recovery reached the held row
+[restore-kill] ok: no batch member commits ahead of the held row
+[restore-kill] ok: recovery completes after releasing the row
+[restore-kill] ok: A reattached to original transaction
+[restore-kill] ok: B reattached to original transaction
+[restore-kill] ok: original bytes broadcast after recovery
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-kill] ok: both recovered claims confirmed
+ Container abandon-verify-watchmand-1 Stopping 
+ Container abandon-verify-watchmand-1 Stopped 
+ Container abandon-verify-captaind-1 Stopping 
+ Container abandon-verify-captaind-1 Stopped 
+[restore-kill] ok: already-mined transaction reconciles without failure
+[restore-kill] ok: already-mined claims confirmed immediately
+[restore-kill] ok: A received only one transaction
+[restore-kill] ok: B received only one transaction
+[restore-kill] ok: A retains original journal bytes
+[restore-kill] ok: B retains original journal bytes
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-bitcoind-1 Waiting 
+ Container abandon-verify-postgres-1 Waiting 
+ Container abandon-verify-cln-1 Waiting 
+ Container abandon-verify-bitcoind-1 Healthy 
+ Container abandon-verify-postgres-1 Healthy 
+ Container abandon-verify-cln-1 Healthy 
+ Container abandon-verify-captaind-1 Starting 
+ Container abandon-verify-captaind-1 Started 
+ Container abandon-verify-captaind-1 Waiting 
+ Container abandon-verify-captaind-1 Healthy 
+ Container abandon-verify-watchmand-1 Starting 
+ Container abandon-verify-watchmand-1 Started 
+[restore-kill] ok: unrelated new coin still pays
+[restore-kill] ok: 24f28b5a has a payout tx
+[restore-kill] ok: 24f28b5a payout address = tr(user key)
+[restore-kill] ok: 24f28b5a output within fee share of 59520 (got 58794)
+[restore-kill] ok: 24f28b5a spent in captaind
+[restore-kill] ok: 24f28b5a journaled once, with the ledger txid
+[restore-kill] ok: 24f28b5a journaled nowhere else
+[restore-kill] ok: every paid coin is spent and nothing else spent it
+[restore-kill] ok: every ledger row with a txid is journaled
+PASS restore-kill
+after: exit 0; duration 249.4s
+EXIT 0

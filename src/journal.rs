@@ -39,14 +39,21 @@ impl Journal {
 
 	pub fn ids(&self) -> Vec<String> { self.paid.keys().cloned().collect() }
 	pub fn contains(&self, id: &str) -> bool { self.paid.contains_key(id) }
+	pub fn txid(&self, id: &str) -> Option<&str> { self.paid.get(id).map(String::as_str) }
 	pub fn has_transaction(&self, txid: &str) -> bool { self.raw.contains_key(txid) }
 
 	pub fn raw_tx(&self, id: &str) -> Option<Vec<u8>> {
 		bitcoin::hex::FromHex::from_hex(self.raw.get(self.paid.get(id)?)?).ok()
 	}
 
-	pub fn transaction(&self, id: &str) -> Option<(String, Vec<u8>)> {
-		Some((self.paid.get(id)?.clone(), self.raw_tx(id)?))
+	/// Legacy records may lack bytes. The database can fill them in, but
+	/// recovery must stop if neither durable copy has the signed payment.
+	pub fn check_transactions(&self) -> anyhow::Result<()> {
+		for (id, txid) in &self.paid {
+			anyhow::ensure!(self.raw.contains_key(txid),
+				"journaled coin {id}, payout {txid}: raw transaction missing; recover the original transaction from the payout database or journal backup");
+		}
+		Ok(())
 	}
 
 	pub fn mark_confirmed(&mut self, txid: &str) { self.confirmed.insert(txid.to_owned()); }
@@ -100,6 +107,18 @@ mod tests {
 			assert_eq!(recovered.raw_tx("z:0"), Some(vec![255]));
 			assert_eq!(recovered.raw_tx("c:0"), Some(vec![3, 4]));
 		}
+		std::fs::remove_file(&p).unwrap();
+	}
+
+	#[test]
+	fn missing_legacy_transaction_names_the_entitlement_and_payment() {
+		let p = std::env::temp_dir().join(format!("journal-missing-{}", std::process::id()));
+		std::fs::write(&p, "coin:0 payout-txid\n").unwrap();
+		let mut j = Journal::open(&p).unwrap();
+		let error = j.check_transactions().unwrap_err().to_string();
+		assert!(error.contains("coin:0") && error.contains("payout-txid"));
+		j.record(&["coin:0".into()], "payout-txid", &[1, 2]).unwrap();
+		j.check_transactions().unwrap();
 		std::fs::remove_file(&p).unwrap();
 	}
 
