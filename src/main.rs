@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use ark::{ProtocolEncoding, Vtxo};
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::{Address, ScriptBuf, Txid};
+use bitcoin::{Address, OutPoint, ScriptBuf, Txid};
 use tracing::{info, warn};
 
 use crate::config::Config;
@@ -37,8 +37,6 @@ enum Outcome {
 	Lost,
 	/// Never touched again automatically.
 	Quarantine(String),
-	/// Quarantine: the round was partially unrolled by this tx.
-	Unrolled(String),
 }
 
 #[tokio::main]
@@ -61,6 +59,9 @@ async fn main() -> anyhow::Result<()> {
 	// Exactly one instance.
 	anyhow::ensure!(db::try_lead(&db).await?, "another sidecar instance holds the leader lock");
 	db::check_tables(&db).await?;
+	// Earlier builds quarantined the whole round. Reconsider those coins
+	// under the exact-path rule; every payout still requires chain evidence.
+	db.execute("DELETE FROM sidecar.quarantine WHERE reason LIKE 'round partially unrolled by %'", &[]).await?;
 	let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
 	let mut journal = journal::Journal::open(&cfg.journal_path)?;
 	db::check_journal_history(&db, &journal.ids()).await?;
@@ -122,11 +123,12 @@ async fn tick(
 	settle_inflight(db, chain, journal).await?;
 
 	// Fee gate: bitcoind's real estimate only, no fallback rate, ever. No
-	// estimate: no claims and no payouts this tick. There is no feerate cap:
+	// estimate: no new claims or transactions. Stored payouts were retried above.
+	// There is no feerate cap:
 	// the per-coin percentage rule bounds what any coin can lose to fees.
 	let p = &cfg.policy;
 	let Some(fee_rate) = chain.estimate_fee_rate(p.payout_conf_target).await? else {
-		warn!("no fee estimate: not claiming or paying this tick");
+		warn!("no fee estimate: not claiming or building payouts this tick");
 		return Ok(());
 	};
 
@@ -136,30 +138,23 @@ async fn tick(
 	let share = checks::fee_share_bound(fee_rate);
 	let mut claims_left = p.max_batch;
 	let mut quarantined: u64 = 0;
-	let mut unrolled = std::collections::HashSet::new();
 	// Coins unaffordable at this rate are left out before the candidate
 	// limit: waiting for fees to fall, they must not crowd out payable coins.
 	let min_amount = p.min_payout_sat.max(checks::min_affordable(share, p.max_fee_pct_per_payout));
 	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, min_amount).await? {
 		if claims_left <= 0 { break }
 		if journal.contains(&c.vtxo_id) { continue } // handled above
-		let (reason, fault) = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
-			Outcome::Quarantine(reason) => (reason, true),
-			// A partial exit quarantines every coin of its round: one fault.
-			Outcome::Unrolled(spender) => (format!("round partially unrolled by {spender}"), unrolled.insert(spender)),
+		let reason = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
+			Outcome::Quarantine(reason) => reason,
 			Outcome::Claimed => { claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed"); continue },
 			Outcome::Lost => { info!(vtxo = %c.vtxo_id, "user redeemed first; skipped"); continue },
 			Outcome::Banned => { info!(vtxo = %c.vtxo_id, "banned; waiting before claim"); continue },
 			Outcome::Wait(why) => { tracing::debug!(vtxo = %c.vtxo_id, why, "waiting"); continue },
 		};
-		if fault {
-			quarantined += 1;
-			if quarantined > p.max_quarantine_per_tick {
-				// Many failures at once smell like an encoding/schema change,
-				// not bad coins: stop instead of quarantining everything.
-				return Err(InvariantViolation(format!(
-					"more than {} quarantines in one tick (last: {reason})", p.max_quarantine_per_tick)).into());
-			}
+		quarantined += 1;
+		if quarantined > p.max_quarantine_per_tick {
+			return Err(InvariantViolation(format!(
+				"more than {} quarantines in one tick (last: {reason})", p.max_quarantine_per_tick)).into());
 		}
 		warn!(vtxo = %c.vtxo_id, %reason, "quarantined");
 		db::quarantine(db, &c.vtxo_id, &reason).await?;
@@ -187,33 +182,36 @@ async fn process_coin(
 	if !checks::affordable(amount, checks::fee_share_bound(fee_rate), p.max_fee_pct_per_payout) {
 		return Ok(Outcome::Wait("fee share above max_fee_pct_per_payout"));
 	}
-	// The funding output must be spent, on-chain, by a sweep to our
-	// scripts only, buried deep enough. The DB only tells us where to look.
 	if chain.is_unspent(anchor).await? { return Ok(Outcome::Wait("anchor not swept yet")) }
-	let Some(spender) = db::recorded_spender(db, &anchor.to_string()).await? else {
-		return Ok(Outcome::Wait("no recorded spender for the anchor yet"));
-	};
-	let Ok(spender_txid) = Txid::from_str(&spender) else {
-		return Ok(Outcome::Quarantine(format!("unparseable spender txid {spender:?}")));
-	};
-	let (spend_tx, confs) = match chain.tx(spender_txid).await {
-		Ok(x) => x,
-		Err(e) => {
-			warn!(vtxo = %c.vtxo_id, %spender, "spender tx unavailable: {e:#}");
-			return Ok(Outcome::Wait("unavailable tx (see warn)"));
-		},
-	};
-	if !checks::is_sweep(&spend_tx, sweep_spks) {
-		// A tree tx (partial unroll) is permanent: quarantine. Anything else is
-		// most likely a wrong sweep_addresses config: wait, never quarantine
-		// en masse because of a config mistake.
-		if db::is_tree_tx(db, &spender).await? {
-			return Ok(Outcome::Unrolled(spender));
-		}
-		warn!(vtxo = %c.vtxo_id, %spender, "anchor spender pays outside sweep_addresses; check config");
-		return Ok(Outcome::Wait("spender pays outside sweep_addresses"));
+	let (anchor_tx, _) = chain.tx(anchor.txid).await?;
+	if let Err(e) = vtxo.validate_unsigned(&anchor_tx) {
+		return Ok(Outcome::Quarantine(format!("invalid exit path: {e}")));
 	}
-	if confs < p.sweep_min_confs { return Ok(Outcome::Wait("sweep not deep enough")) }
+	// Only this coin's output at each level belongs to its exit path. A
+	// swept sibling, even in the same transaction, cannot settle this coin.
+	let path = std::iter::once(anchor).chain(vtxo.transactions()
+		.map(|t| OutPoint::new(t.tx.compute_txid(), t.output_idx as u32)));
+	let mut swept = false;
+	for outpoint in path {
+		if outpoint != anchor && chain.is_unspent(outpoint).await? { break; }
+		let Some(spender) = db::recorded_spender(db, &outpoint.to_string()).await? else { continue; };
+		let Ok(spender_txid) = Txid::from_str(&spender) else {
+			return Ok(Outcome::Quarantine(format!("unparseable spender txid {spender:?}")));
+		};
+		let (spend_tx, confs) = match chain.tx(spender_txid).await {
+			Ok(x) => x,
+			Err(e) => {
+				warn!(vtxo = %c.vtxo_id, %spender, "spender tx unavailable: {e:#}");
+				continue;
+			},
+		};
+		if checks::is_sweep_of(&spend_tx, outpoint, sweep_spks) {
+			if confs < p.sweep_min_confs { return Ok(Outcome::Wait("sweep not deep enough")) }
+			swept = true;
+			break;
+		}
+	}
+	if !swept { return Ok(Outcome::Wait("no confirmed sweep on this coin's exit path")) }
 
 	// Nothing in flight may hold the coin.
 	if db::in_round_participation(db, &c.vtxo_id).await? { return Ok(Outcome::Wait("in a round participation")) }

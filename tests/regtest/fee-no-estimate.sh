@@ -8,7 +8,7 @@ expired_coin 60000
 for i in $(seq 40); do btc estimatesmartfee 6 | grep -q '"feerate"' || break; mine 25; done
 check "estimator empty" test -z "$(btc estimatesmartfee 6 | grep '"feerate"')"
 ticks 2
-check "logged 'no fee estimate'" grep -q "no fee estimate: not claiming or paying" "$LOG/tick.log"
+check "logged 'no fee estimate'" grep -q "no fee estimate: not claiming or building payouts" "$LOG/tick.log"
 check "no ban" eq "$(bans "$X")" 0
 check "no claim" eq "$(payout_state "$X")" ""
 check "still spendable" eq "$(spend_state "$X")" spendable

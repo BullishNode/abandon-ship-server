@@ -1,9 +1,6 @@
 #!/bin/bash
-# T's exit (an arkoor coin, two steps deep) is started, its first step
-# confirms, then it is cancelled before the final tx. The round is partially
-# unrolled: T's coin and every other coin left in it are quarantined, never
-# paid. That is one on-chain fact, not many failures: it must not trip the
-# circuit breaker (max_quarantine_per_tick=1) and stop payouts of other rounds (Z).
+# A cancelled exit unrolls a round before expiry. Coins whose own paths
+# are later swept must settle, along with the independent round Z.
 . "$(dirname "$0")/lib.sh"
 mkcfg max_quarantine_per_tick=1
 A=$(wname a); B=$(wname b); C=$(wname c); T=$(wname exiter); Z=$(wname z)
@@ -27,15 +24,17 @@ expire_and_sweep "$XA $XB $XC $XZ" || finish
 
 # Every user coin left in the unrolled round (a wallet whose refresh missed
 # the round keeps a board coin elsewhere: not part of it).
-UNR=$(q "SELECT vtxo_id FROM vtxo WHERE anchor_point='$ANCHOR' AND policy_type='pubkey' AND spend_state='spendable'")
+UNR=$(q "SELECT vtxo_id FROM vtxo WHERE anchor_point='$ANCHOR' AND policy_type='pubkey' AND spend_state='spendable' AND confirmed_height IS NULL")
 check "T's coin and others left in the unrolled round" test "$(wc -w <<< "$UNR")" -ge 2 -a -n "$(grep -wF "$X" <<< "$UNR")"
 tick; RC=$?
 check "breaker not tripped (exit $RC)" test $RC -eq 0
+check "unrolled branches paid" pay_until "$UNR" 4
 for x in $UNR; do
-	check "${x:0:8} quarantined: round partially unrolled" grep -q "round partially unrolled" <<< "$(quarantine_reason "$x")"
+	check "${x:0:8} not quarantined" eq "$(quarantine_reason "$x")" ""
+	check "${x:0:8} journaled once" eq "$(journaled "$x")" 1
 done
 check "Z paid" pay_until "$XZ" 3
 assert_paid "$XZ" "$PKZ" "$AMTZ"
-check "unrolled round never paid" eq "$(q "SELECT count(*) FROM sidecar.payout p JOIN vtxo v USING (vtxo_id) WHERE v.anchor_point='$ANCHOR'")" 0
+
 confirm_payouts
 finish

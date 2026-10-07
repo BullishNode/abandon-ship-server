@@ -81,14 +81,6 @@ pub async fn recorded_spender(db: &Client, outpoint: &str) -> anyhow::Result<Opt
 	Ok(row.and_then(|r| r.get::<_, Option<String>>("onchain_spent_txid")))
 }
 
-/// Whether captaind has a vtxo created by this tx, i.e. it is a tree tx
-/// (a partial unroll), not a sweep. Only used to choose between quarantine
-/// and wait; never to decide a payout.
-pub async fn is_tree_tx(db: &Client, txid: &str) -> anyhow::Result<bool> {
-	Ok(db.query_one("SELECT EXISTS (SELECT 1 FROM vtxo WHERE vtxo_txid = $1) AS e", &[&txid])
-		.await?.try_get::<_, bool>("e")?)
-}
-
 /// Any round participation still referencing the coin.
 pub async fn in_round_participation(db: &Client, vtxo_id: &str) -> anyhow::Result<bool> {
 	Ok(db.query_one("

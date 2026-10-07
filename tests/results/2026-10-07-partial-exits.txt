@@ -1,0 +1,89 @@
+Exact-path partial-round payouts — 2026-10-07
+
+Before recovery-d: exit-full FAIL / exit 1, 84.4s, at swept-branch B payout and quarantine assertions.
+First partial-d run: exit-full FAIL / exit 1, 111.2s. B was paid and A retained its exit; the journal assertion only understood legacy one-ID records. The helper now counts exact IDs in both legacy and atomic batch records.
+After partial-d: exit-full PASS113.7s; exit-breaker PASS186.1s; exit-blocked PASS119.1s; unclaimed-delegated PASS172.0s. All exited0.
+Integrated cargo test --locked: 8 PASS / 0 FAIL.
+Partial-d binary SHA256: 9dd63c76d900fc63dbcc63def9f97b62d13cebd7bc76c8148b44735e98266f4b
+
+exit-full performs a real A exit and B branch sweep. It temporarily clears A's recorded leaf confirmation to make the exit-path check, rather than the SQL filter, exclude A. It verifies A is neither banned nor paid and its exit output remains unspent. The recorded height is restored during cleanup. exit-breaker exercises swept branches after a canceled partial exit and an independent coin; no round-wide quarantine is used.
+unclaimed-delegated receives a real sidecar payout, derives its descriptor from the seed alone, discovers 148796 sat with Core, and confirms a spend. This range0..200 check is not the planned sparse high-index benchmark.
+
+after exit-full: expected 0; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/partial-d-after-1791409458763766727
+[exit-full] ok: A's leaf confirmed (exit done)
+[exit-full] ok: A remains an otherwise eligible ledger coin
+[exit-full] ok: swept branch B paid
+[exit-full] ok: A exercised the path check without the leaf-height filter
+[exit-full] ok: fdecf673 has a payout tx
+[exit-full] ok: fdecf673 payout address = tr(user key)
+[exit-full] ok: fdecf673 output within fee share of 59520 (got 58799)
+[exit-full] ok: fdecf673 spent in captaind
+[exit-full] ok: fdecf673 journaled once, with the ledger txid
+[exit-full] ok: fdecf673 journaled nowhere else
+[exit-full] ok: A never paid
+[exit-full] ok: A never banned
+[exit-full] ok: B is not quarantined
+[exit-full] ok: A still owns the unspent exit output
+[exit-full] ok: every paid coin is spent and nothing else spent it
+[exit-full] ok: every ledger row with a txid is journaled
+PASS exit-full
+after: exit 0; duration 113.7s
+branches exit-breaker: expected 0; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/partial-d-branches-1791409572454436803
+[exit-breaker] ok: round unrolled (funding output spent)
+[exit-breaker] ok: T's leaf never confirmed
+[exit-breaker] ok: T's coin and others left in the unrolled round
+[exit-breaker] ok: breaker not tripped (exit 0)
+[exit-breaker] ok: unrolled branches paid
+[exit-breaker] ok: a6ceb143 not quarantined
+[exit-breaker] ok: a6ceb143 journaled once
+[exit-breaker] ok: d72203a1 not quarantined
+[exit-breaker] ok: d72203a1 journaled once
+[exit-breaker] ok: 96344cd6 not quarantined
+[exit-breaker] ok: 96344cd6 journaled once
+[exit-breaker] ok: 237b69f6 not quarantined
+[exit-breaker] ok: 237b69f6 journaled once
+[exit-breaker] ok: 11fb9d9d not quarantined
+[exit-breaker] ok: 11fb9d9d journaled once
+[exit-breaker] ok: Z paid
+[exit-breaker] ok: a5ab2a90 has a payout tx
+[exit-breaker] ok: a5ab2a90 payout address = tr(user key)
+[exit-breaker] ok: a5ab2a90 output within fee share of 59520 (got 59216)
+[exit-breaker] ok: a5ab2a90 spent in captaind
+[exit-breaker] ok: a5ab2a90 journaled once, with the ledger txid
+[exit-breaker] ok: a5ab2a90 journaled nowhere else
+[exit-breaker] ok: every paid coin is spent and nothing else spent it
+[exit-breaker] ok: every ledger row with a txid is journaled
+PASS exit-breaker
+branches: exit 0; duration 186.1s
+exit-blocked: artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/partial-d-exit-blocked-1791410650698939922
+[exit-blocked] ok: exit started (listed)
+[exit-blocked] ok: progress cannot pay fees
+[exit-blocked] ok: exit stuck: funding output unspent before expiry
+[exit-blocked] ok: swept wholesale (spender is a sweep, not a tree tx)
+[exit-blocked] ok: paid
+[exit-blocked] ok: 2087b505 has a payout tx
+[exit-blocked] ok: 2087b505 payout address = tr(user key)
+[exit-blocked] ok: 2087b505 output within fee share of 50000 (got 49539)
+[exit-blocked] ok: 2087b505 spent in captaind
+[exit-blocked] ok: 2087b505 journaled once, with the ledger txid
+[exit-blocked] ok: 2087b505 journaled nowhere else
+[exit-blocked] ok: every paid coin is spent and nothing else spent it
+[exit-blocked] ok: every ledger row with a txid is journaled
+PASS exit-blocked
+exit-blocked: exit 0; duration 119.1s
+unclaimed-delegated: artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/partial-d-unclaimed-delegated-1791410769749539088
+[unclaimed-delegated] board coin 431a3bbe175effd214367f913040d2a27ced90d9d0a412b8d6b2a8a42d923056:0; delegated refresh, then the owner goes away
+[unclaimed-delegated] ok: delegated refresh ran in a round
+[unclaimed-delegated] ok: one unclaimed output
+[unclaimed-delegated] unclaimed output 05572e49f9bd2b8156af9cff725b81939f4eeb2890e40c222a7cac51ce051c8a:0 (149520 sat)
+[unclaimed-delegated] ok: paid within 3 ticks
+[unclaimed-delegated] ok: not quarantined
+[unclaimed-delegated] ok: output within fee share of 149520 (got 148796)
+[unclaimed-delegated] ok: descriptor from the seed
+[unclaimed-delegated] ok: seed wallet sees the payout (148796 sat)
+[unclaimed-delegated] ok: seed wallet swept it on-chain
+[unclaimed-delegated] ok: every paid coin is spent and nothing else spent it
+[unclaimed-delegated] ok: every ledger row with a txid is journaled
+PASS unclaimed-delegated
+unclaimed-delegated: exit 0; duration 172.0s
+EXIT 0

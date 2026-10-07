@@ -9,23 +9,23 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 1. **Checks.**
    - captaind schema version is allowlisted;
    - the payout wallet is loaded;
-   - `estimatesmartfee` returns a rate. Without one, nothing is claimed or paid.
+   - `estimatesmartfee` returns a rate before new claims or transactions. Stored payouts retry even without an estimate.
 2. **Journal reconciliation.**
    - every paid ledger row is in the journal;
    - a journaled coin that is spendable again in captaind (DB restore) is set back to spent, quarantined, and its journaled payout tx is broadcast again (a no-op if already known).
 3. **Settle.** Rebroadcast stored payout txs that are unconfirmed or evicted, and mark txs with 6 confirmations as confirmed.
-4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat` and affordable at the current rate (both filtered before the candidate limit), not paid, not quarantined. Claimed coins still payable at the current rate count against `max_batch`; ones that fees made unaffordable wait without blocking new claims.
+4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat` and affordable at the current rate (both filtered before the candidate limit), not paid, not quarantined. Existing claims are attempted first. Claims deferred by actual fees or funding leave room for new claims.
 5. **Per coin.** A problem with one coin quarantines that coin; it never stops the loop.
    1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
    2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
-   3. **Sweep.** The anchor (round funding output) must be spent by a tx paying only the configured `sweep_addresses` (ignoring OP_RETURN and P2A), buried `sweep_min_confs`. A tree tx spending it means the round was partially unrolled: quarantine (all its coins count as one quarantine for `max_quarantine_per_tick`).
+   3. **Sweep.** Validate the coin's exit path against its anchor transaction. A transaction buried `sweep_min_confs` must spend an exact outpoint on that path and pay only the configured `sweep_addresses` (ignoring OP_RETURN and P2A). Sweeping a sibling does not qualify this coin.
    4. **In flight.** Skip while a round participation still references the coin.
    5. **Ban, then wait.** Set `banned_until_height`, then wait `ban_wait_secs`. The claim needs that exact ban still in place: if an operator lifts it, the wait restarts.
    6. **Claim.** In one transaction: `UPDATE vtxo SET spend_state='spent' WHERE … spend_state IN ('spendable','unclaimed') AND <our ban>`, then insert the payout row.
 6. **Pay.** For all claimed coins, in one batch:
    - one output per address, fee subtracted from the outputs, funded at the checked rate;
    - verify the tx: exact outputs, at most one change output owned by the wallet, per-output fee share;
-   - store it in the DB, then append it to the journal (one line per coin, the raw tx once per tx; fsync), then broadcast.
+   - store it in the DB, then append it to the journal (one atomic line per batch, with its raw transaction; fsync), then broadcast.
 7. **Invariants.** Every paid coin is `spent` with no round, arkoor or offboard spend recorded, and no paid coin row is missing. A violation exits the process.
 
 ## Config
