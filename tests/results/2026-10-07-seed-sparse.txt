@@ -1,0 +1,26 @@
+Seed-only recovery at sparse high indexes — 2026-10-07
+
+Scenario tests/regtest/seed-sparse.sh: PASS, exit 0.
+Observation: 20261007T234554-6dc80a7b.
+Core: /Satoshi:31.0.0/, isolated abandon-verify regtest.
+Funded indexes: 0, 257, 65,537, 999,999, 999,999 (key reuse).
+Five direct on-chain payments of 10,000 sat each to the exact Bark coin-key
+payout script. These are not five newly abandoned high-index Ark coins;
+unclaimed-delegated independently covers actual sidecar payment and recovery.
+
+0..200 scan: exactly one output; misses four.
+0..999,999 scan: all five outputs, 50,000 sat.
+Measured server-side scan: 128.996 seconds.
+Bitcoin Core RSS before: 90824 KiB; sampled peak: 998148 KiB (100-ms interval).
+UTXO set scanned: 11484 outputs at regtest height 15269.
+This is one million derivations on this host and UTXO set, not an unbounded
+seed-search guarantee, a signet benchmark or a wallet default scan range.
+
+The scan's public descriptors identified all four distinct key indexes.
+A fresh plain Core wallet imported those fixed private descriptors and
+confirmed a transaction spending exactly the five discovered outpoints.
+No Bark/server metadata was needed to scan or spend after deriving from seed.
+Mnemonics/private descriptors are excluded from this published report.
+
+Durable detailed evidence (local):
+/home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/seed-sparse-1791416753965147390/seed-sparse

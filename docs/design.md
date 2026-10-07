@@ -40,3 +40,18 @@ An unclaimed replacement whose original input has no confirmed sweep waits witho
 - **No RBF bump:** a payout stuck at a low fee is rebroadcast but not bumped.
 - **Client side:** captaind does not tell wallets that a coin was paid out. A wallet must ask (`GetVtxoStatus`), find the payout at `tr(coin key)`, and sweep it. Until it does, the coin still appears in its balance and refreshes of it are refused.
 - **Dependence on captaind's DB:** column names, `spend_state` values and the stored VTXO encoding are captaind internals; every captaind upgrade goes through the gate in `deployment.md`.
+
+## Seed-only recovery range tested
+
+`tests/regtest/seed-sparse.sh` funds the payout script directly at indexes 0,
+257, 65,537 and 999,999, including two outputs at the last key. Plain Core
+`scantxoutset` over `tr(coin_xprv/*)` with range `[0,999999]` found and a fresh
+Core wallet spent all five. On Core 31 and the recorded 11,484-output regtest
+UTXO set, the scan took 128.996 seconds; RSS was 90,824 KiB before and sampled
+peak 998,148 KiB. A `[0,200]` scan found only index zero. Details and limits:
+`tests/results/2026-10-07-seed-sparse.txt`.
+
+The heir still needs a scan range; the seed does not reveal the highest used
+index. These measurements do not promise discovery beyond 999,999 or describe
+bark-web's automatic restore behavior. `unclaimed-delegated` separately tests
+an actual sidecar payment followed by seed-only Core recovery and spending.
