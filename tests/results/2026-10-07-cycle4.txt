@@ -1,0 +1,50 @@
+Cycle 4 review, 2026-10-07
+
+Source: 93d31fbcf20366a2ac68b38ebd40faf153858525 (same Rust as fb545fe).
+Harness: fb545fe plus claim-gates and fee-fragmented reviewed from
+wip/cycle4-mutation. claim-gates additionally pauses the real ban-age query
+with a test-owned table lock, inserts participation after the first probe,
+then cancels that lock holder so the second probe is exercised.
+Project: abandon-session2; retained volumes. No other stack changed.
+
+Unmodified implementation: 2 PASS / 0 FAIL, driver exit 0.
+  claim-gates     PASS 172s
+  fee-fragmented  PASS 144s
+
+Each independently built mutant: 1 expected scenario FAIL, exit 1.
+  sweep-depth: 171s; sweep 7 deep < required 10 nevertheless banned.
+  participation-first: 179s; existing participation nevertheless banned.
+  participation-second: 182s; participation inserted between probes was claimed.
+  actual-fee: 168s; 59520-sat entitlement paid 53109 sat despite 3% limit.
+Combined mutation driver: exit 0 (all expected failures observed).
+
+Exact source mutations (one at a time, never in release code):
+  src/main.rs: replace `if confs < p.sweep_min_confs` with
+    `if false && confs < p.sweep_min_confs`.
+  src/main.rs: remove only the first db::in_round_participation guard.
+  src/main.rs: remove only the second db::in_round_participation guard.
+  src/checks.rs: replace the actual-output affordable(...) assertion with
+    true || affordable(...).
+
+Immutable mutant SHA-256:
+7b2aabba6ce5fffae9a782975e011270b6e9e197e3d8b3d3cfe757684a125b21 sweep-depth
+9a681994e81c3a2b3121805bb4e4d82db0edc92eba49a18839b6d30de91bd8c0 participation-first
+8ce97471d88d3ae81f2d14ed84309d6aca6b6067b3a9dbf0e8b326d58204cff8 participation-second
+2a3ab4a3b9b9fca76909d25134f6b3c97f5e24452294c59d5d06b09f5d0ea9db actual-fee
+
+Raw stdout/stderr, logs, configuration and source patches remain in
+~/bark-integration-2026-10-01/session2-continuation/mutation-oct7-*/
+and mutations/. Invoke individual scenarios with BIN=<mutant> to reproduce;
+the normal run-all.sh includes the two scenarios without source mutation.
+
+Kept: the two scenarios and run-all registrations. The main harness already
+includes the branch's BIN override and longer captaind catch-up wait.
+Dropped: 18 unexecuted mutation TODO rows; untested fixed-sleep additions to
+race tests; manually setting a contradictory Ark spend on an already-paid
+row. These changes do not establish a further in-scope settlement guarantee.
+No passing result is claimed for those dropped changes.
+
+Client branch's duplicate-outpoint regression was already integrated at
+9ea5de4 in tests/utils/expiry-payout.test.ts. Before mutant: 1 expected FAIL;
+correct implementation: PASS, also included in the 1078-pass client suite.
+Client local and remote wip/cycle4-mutation branches deleted on 2026-10-07.

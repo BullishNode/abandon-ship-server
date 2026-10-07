@@ -5,10 +5,10 @@
 cd "$(dirname "$0")"
 . ./lib.sh
 SCENARIOS=(${@:-schema-version happy-single happy-batch shared-address unclaimed-delegated
-	race-held-lock race-user-refresh race-operator-unban h2-probe
+	race-held-lock race-user-refresh race-operator-unban claim-gates h2-probe
 	exit-full exit-breaker exit-blocked attack-ban-wait
 	tamper-payout db-restore crash-signed
-	fee-pct-rule fee-stuck-claim fee-window fee-no-estimate circuit-breaker infra-bitcoind infra-postgres
+	fee-pct-rule fee-stuck-claim fee-window fee-fragmented fee-no-estimate circuit-breaker infra-bitcoind infra-postgres
 	web-journey})
 
 (cd "$ROOT" && cargo build -q) || { echo "build failed"; exit 2; }
