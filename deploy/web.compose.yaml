@@ -9,6 +9,9 @@ services:
   barkd:
     restart: unless-stopped
     image: abandon-ship/bark:release-3ab429866
+    # uid 1000 like the upstream barkd image, so the api (node, uid 1000) can
+    # read barkd's auth_token.
+    user: "1000:1000"
     entrypoint: [/bin/sh, -c, "mkdir -p /data/.bark && exec barkd --port 4000 --host 0.0.0.0 --datadir /data/.bark --expose-mnemonic"]
     volumes: ["webwallet:/data"]
     depends_on:
