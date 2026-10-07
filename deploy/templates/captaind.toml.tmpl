@@ -2,7 +2,7 @@
 data_dir = "/data/captaind"
 network = "${NETWORK}"
 vtxo_lifetime = ${VTXO_LIFETIME}
-min_board_amount = "20000 sat"
+min_board_amount = "${MIN_BOARD_AMOUNT}"
 vtxo_exit_delta = ${VTXO_EXIT_DELTA}
 max_vtxo_exit_depth = 100
 max_arkoor_fanout = 4
@@ -77,7 +77,7 @@ ppm_expiry_table = [
 ]
 
 [vtxopool]
-vtxo_targets = [ "10000sat:10", "1000000sat:10" ]
+vtxo_targets = ${VTXO_POOL_TARGETS}
 vtxo_target_issue_threshold = 80
 vtxo_lifetime = ${POOL_VTXO_LIFETIME}
 vtxo_pre_expiry = 10
