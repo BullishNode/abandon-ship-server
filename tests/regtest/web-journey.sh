@@ -5,15 +5,21 @@
 # restore the seed on a second barkd, sweep, and check that the money shows once.
 # Each barkd here is a fresh container with a fresh wallet, removed at the end.
 . "$(dirname "$0")/lib.sh"
-B=127.0.0.1:43010 B2=127.0.0.1:43011 NET=${PROJECT}_default
+NET=${PROJECT}_default
 C=$PROJECT-web-journey C2=$PROJECT-web-journey-restore
 api() { curl -s -X "$1" "$2$3" -H 'content-type: application/json' -d "${4:-{\}}"; } # api <method> <host> <path> [json]
 jlen() { python3 -c "import json,sys; print(len(json.load(sys.stdin)))"; }
-barkd() { # barkd <container> <host:port>
+barkd() { # barkd <container>: print Docker's assigned localhost address
 	docker rm -f "$1" > /dev/null 2>&1
-	docker run -d --name "$1" --network $NET -p "$2:3000" abandon-ship/bark:variant-b \
-		barkd --host 0.0.0.0 --port 3000 --dangerously-allow-remote-no-auth > /dev/null
-	local i; for i in $(seq 30); do api GET "$2" /ping | grep -q . && return; sleep 1; done
+	docker run -d --name "$1" --network $NET -p 127.0.0.1::3000 abandon-ship/bark:variant-b \
+		barkd --host 0.0.0.0 --port 3000 --dangerously-allow-remote-no-auth > /dev/null || return 1
+	local i address
+	address=$(docker port "$1" 3000/tcp) || return 1
+	for i in $(seq 30); do
+		if api GET "$address" /ping | grep -q .; then echo "$address"; return 0; fi
+		sleep 1
+	done
+	return 1
 }
 create() { # create <host:port> [json fields]: regtest wallet on our captaind and bitcoind
 	api POST "$1" /api/v1/wallet/create "{\"network\":\"regtest\",\"ark_server\":\"http://captaind:3535\",${2:-}
@@ -25,7 +31,8 @@ print(sum(m['subsystem']['kind'] == 'expiry-payout' for m in json.load(sys.stdin
 
 mkcfg
 BIRTH=$(tip)
-barkd $C $B; create $B; up $B || { check "barkd wallet ready" false; finish; }
+B=$(barkd "$C") || { check "barkd started" false; finish; }
+create $B; up $B || { check "barkd wallet ready" false; finish; }
 A=$(api POST $B /api/v1/onchain/addresses/next | python3 -c "import json,sys;print(json.load(sys.stdin)['address'])")
 btc -rpcwallet=faucet -named sendtoaddress address="$A" amount=0.01 fee_rate=5 > /dev/null; mine 1; api POST $B /api/v1/onchain/sync > /dev/null
 
@@ -48,7 +55,8 @@ check "payout broadcast" pay_until "$ID" 6 "'broadcast'"
 TXID=$(payout_txid "$ID")
 
 # Back online, payout in the mempool (J1).
-docker start $C > /dev/null; up $B
+docker start $C > /dev/null; B=$(docker port "$C" 3000/tcp)
+up $B || { check "barkd wallet ready after coming online" false; finish; }
 check "J1: server spent state adopted" eq "$(api POST $B /api/v1/wallet/vtxos/adopt-server-status "{\"vtxo_ids\":[\"$ID\"]}" | grep -o '"state":"[a-z]*"')" '"state":"spent"'
 check "J1: coin marked spent in the wallet" eq "$(api GET $B /api/v1/wallet/vtxos/$ID | python3 -c "import json,sys;print(json.load(sys.stdin)['state']['type'])")" spent
 say "J1: payouts seen while the payout is in the mempool: $(api POST $B /api/v1/wallet/vtxos/expiry-payouts | jlen) (bitcoind chain source: confirmed only)"
@@ -60,13 +68,14 @@ check "payout found after 1 conf" eq "$(echo "$P" | jlen)" 1
 check "found payout is the ledger tx" grep -q "$TXID" <<< "$P"
 
 # J16: barkd restarts; the adopted spent state and the payout survive.
-docker restart $C > /dev/null; up $B
+docker restart $C > /dev/null; B=$(docker port "$C" 3000/tcp)
+up $B || { check "barkd wallet ready after restart" false; finish; }
 check "J16: coin still spent after a barkd restart" eq "$(api GET $B /api/v1/wallet/vtxos/$ID | python3 -c "import json,sys;print(json.load(sys.stdin)['state']['type'])")" spent
 check "J16: payout still found after a barkd restart" grep -q "$TXID" <<< "$(api POST $B /api/v1/wallet/vtxos/expiry-payouts)"
 
 # J6: restore the seed on a second barkd before the sweep.
 # The mnemonic goes from one container to the other, never to the terminal.
-barkd $C2 $B2
+B2=$(barkd "$C2") || { check "restored barkd started" false; finish; }
 create $B2 "\"birthday_height\":$BIRTH,\"mnemonic\":\"$(docker exec $C cat /root/.bark/mnemonic | tr -d '\n')\","
 up $B2 || say "restored barkd has no wallet"; api POST $B2 /api/v1/wallet/sync > /dev/null
 check "J6: restored wallet has the coin as spent" eq "$(api GET $B2 /api/v1/wallet/vtxos/$ID | python3 -c "import json,sys;print(json.load(sys.stdin)['state']['type'])")" spent
