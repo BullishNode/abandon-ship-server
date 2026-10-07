@@ -10,6 +10,7 @@ const LEADER_LOCK: i64 = 0x41_42_41_4e_44_4f_4e; // "ABANDON"
 pub struct Candidate {
 	pub vtxo_id: String,
 	pub vtxo: Vec<u8>,
+	pub expiry: i32,
 }
 
 pub struct Payout {
@@ -51,9 +52,9 @@ pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
 /// Expired, unpaid, unquarantined, spendable user coins past the grace period,
 /// of at least `min_amount` (filtered before the limit, so coins too small to
 /// pay never fill the window).
-pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64) -> anyhow::Result<Vec<Candidate>> {
+pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64, after: &(i32, String)) -> anyhow::Result<Vec<Candidate>> {
 	let rows = db.query("
-		SELECT v.vtxo_id, v.vtxo
+		SELECT v.vtxo_id, v.vtxo, v.expiry
 		FROM vtxo v
 		WHERE v.policy_type = 'pubkey'
 		  -- 'unclaimed' = a delegated refresh output whose owner never came back
@@ -63,13 +64,15 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amoun
 		  AND v.amount >= $4::bigint
 		  AND NOT EXISTS (SELECT 1 FROM sidecar.payout p WHERE p.vtxo_id = v.vtxo_id)
 		  AND NOT EXISTS (SELECT 1 FROM sidecar.quarantine q WHERE q.vtxo_id = v.vtxo_id)
-		ORDER BY v.expiry
+		  AND (v.expiry, v.vtxo_id) > ($5, $6)
+		ORDER BY v.expiry, v.vtxo_id
 		LIMIT $3::bigint * 20
-	", &[&(grace as i64), &(tip as i64), &limit, &(min_amount as i64)]).await?;
+	", &[&(grace as i64), &(tip as i64), &limit, &(min_amount as i64), &after.0, &after.1]).await?;
 	rows.into_iter()
 		.map(|r| Ok(Candidate {
 			vtxo_id: r.try_get("vtxo_id")?,
 			vtxo: r.try_get("vtxo")?,
+			expiry: r.try_get("expiry")?,
 		}))
 		.collect()
 }
@@ -79,14 +82,6 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amoun
 pub async fn recorded_spender(db: &Client, outpoint: &str) -> anyhow::Result<Option<String>> {
 	let row = db.query_opt("SELECT onchain_spent_txid FROM vtxo WHERE vtxo_id = $1", &[&outpoint]).await?;
 	Ok(row.and_then(|r| r.get::<_, Option<String>>("onchain_spent_txid")))
-}
-
-/// Whether captaind has a vtxo created by this tx, i.e. it is a tree tx
-/// (a partial unroll), not a sweep. Only used to choose between quarantine
-/// and wait; never to decide a payout.
-pub async fn is_tree_tx(db: &Client, txid: &str) -> anyhow::Result<bool> {
-	Ok(db.query_one("SELECT EXISTS (SELECT 1 FROM vtxo WHERE vtxo_txid = $1) AS e", &[&txid])
-		.await?.try_get::<_, bool>("e")?)
 }
 
 /// Any round participation still referencing the coin.
@@ -179,9 +174,9 @@ pub async fn claim(
 
 /// Every coin id in the ledger with its txid (for journal reconciliation).
 /// Without the raw tx: every row of a batch stores the whole batch tx.
-pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String)>> {
-	db.query("SELECT vtxo_id, txid FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
-		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?))).collect()
+pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, bool)>> {
+	db.query("SELECT vtxo_id, txid, state = 'confirmed' AS confirmed FROM sidecar.payout WHERE txid IS NOT NULL", &[]).await?
+		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?, r.try_get("confirmed")?))).collect()
 }
 
 pub async fn raw_tx(db: &Client, txid: &str) -> anyhow::Result<Vec<u8>> {
@@ -208,12 +203,6 @@ pub async fn claimed_payouts(db: &Client) -> anyhow::Result<Vec<Payout>> {
 	})).collect()
 }
 
-/// The stored txs of payouts in `state`, one per txid.
-pub async fn txs_in_state(db: &Client, state: &str) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-	db.query("SELECT DISTINCT txid, raw_tx FROM sidecar.payout WHERE state = $1 AND txid IS NOT NULL", &[&state])
-		.await?.into_iter().map(|r| Ok((r.try_get("txid")?, r.try_get("raw_tx")?))).collect()
-}
-
 /// Store the signed batch tx for these claims before it is broadcast.
 pub async fn mark_signed(db: &mut Client, vtxo_ids: &[String], txid: &str, raw: &[u8]) -> anyhow::Result<()> {
 	let tx = db.transaction().await?;
@@ -226,10 +215,10 @@ pub async fn mark_signed(db: &mut Client, vtxo_ids: &[String], txid: &str, raw: 
 	Ok(())
 }
 
-pub async fn set_state_by_txid(db: &Client, txid: &str, from: &str, to: &str) -> anyhow::Result<()> {
+pub async fn set_state_by_txid(db: &Client, txid: &str, to: &str) -> anyhow::Result<()> {
 	db.execute(
-		"UPDATE sidecar.payout SET state = $3, updated_at = NOW() WHERE txid = $1 AND state = $2",
-		&[&txid, &from, &to],
+		"UPDATE sidecar.payout SET state = $2, updated_at = NOW() WHERE txid = $1 AND state IN ('signed','broadcast')",
+		&[&txid, &to],
 	).await?;
 	Ok(())
 }

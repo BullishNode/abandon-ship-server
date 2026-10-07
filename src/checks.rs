@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use bitcoin::{ScriptBuf, Transaction};
+use bitcoin::{OutPoint, ScriptBuf, Transaction};
 
 /// P2TR dust limit.
 pub const P2TR_DUST_SAT: u64 = 330;
@@ -47,6 +47,12 @@ pub fn is_sweep(spender: &Transaction, sweep_spks: &[ScriptBuf]) -> bool {
 		paid_any = true;
 	}
 	paid_any
+}
+
+/// The chain transaction must spend the precise output on the coin's path.
+pub fn is_sweep_of(spender: &Transaction, outpoint: OutPoint, sweep_spks: &[ScriptBuf]) -> bool {
+	spender.input.iter().any(|input| input.previous_output == outpoint)
+		&& is_sweep(spender, sweep_spks)
 }
 
 /// Verify a built payout before it is stored:
@@ -126,6 +132,19 @@ mod tests {
 		assert!(is_sweep(&tx(vec![(sweep.clone(), 1000), (p2a.clone(), 0)]), std::slice::from_ref(&sweep)));
 		assert!(!is_sweep(&tx(vec![(sweep.clone(), 1000), (spk(2), 500)]), std::slice::from_ref(&sweep)));
 		assert!(!is_sweep(&tx(vec![(p2a, 0)]), &[sweep]));
+	}
+
+	#[test]
+	fn a_swept_sibling_is_not_this_coins_sweep() {
+		use bitcoin::{hashes::Hash, Txid, TxIn};
+		let txid = Txid::from_byte_array([7; 32]);
+		let a = OutPoint::new(txid, 0);
+		let b = OutPoint::new(txid, 1);
+		let sweep = spk(1);
+		let mut spending_b = tx(vec![(sweep.clone(), 1000)]);
+		spending_b.input.push(TxIn { previous_output: b, ..Default::default() });
+		assert!(is_sweep_of(&spending_b, b, std::slice::from_ref(&sweep)));
+		assert!(!is_sweep_of(&spending_b, a, &[sweep]));
 	}
 
 	#[test]

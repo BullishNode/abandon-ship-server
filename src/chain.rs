@@ -1,5 +1,5 @@
 //! bitcoind RPC (blocking client, called from spawn_blocking). The chain is
-//! the source of truth; captaind's DB only supplies hints.
+//! authority for sweep transactions; captaind records spender hints.
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -68,7 +68,7 @@ impl Chain {
 		}).await
 	}
 
-	/// true if the outpoint is currently unspent (or unknown) per bitcoind.
+	/// True if bitcoind currently reports the outpoint as unspent.
 	pub async fn is_unspent(&self, op: OutPoint) -> anyhow::Result<bool> {
 		self.run(move |c| {
 			let v: serde_json::Value = c.call("gettxout", &[op.txid.to_string().into(), op.vout.into(), true.into()])?;
@@ -111,6 +111,28 @@ impl Chain {
 			let tx: Transaction = bitcoin::consensus::encode::deserialize_hex(hex)?;
 			let raw = bitcoin::consensus::serialize(&tx);
 			Ok(BuiltPayout { tx, raw, fee_sat: Amount::from_btc(fee_btc)?.to_sat() })
+		}).await
+	}
+
+	/// Reserve any still-unspent inputs of a stored payout. Wallet locks are
+	/// rebuilt from the durable transaction after a node or sidecar restart.
+	pub async fn reserve_inputs(&self, raw: &[u8]) -> anyhow::Result<()> {
+		let tx: Transaction = bitcoin::consensus::deserialize(raw)?;
+		self.run(move |c| {
+			let locked: Vec<serde_json::Value> = c.call("listlockunspent", &[])?;
+			let mut reserve = Vec::new();
+			for input in tx.input {
+				let op = input.previous_output;
+				let entry = serde_json::json!({"txid": op.txid.to_string(), "vout": op.vout});
+				if locked.contains(&entry) { continue; }
+				let unspent: serde_json::Value = c.call("gettxout", &[op.txid.to_string().into(), op.vout.into(), true.into()])?;
+				if !unspent.is_null() { reserve.push(entry); }
+			}
+			if !reserve.is_empty() {
+				let ok: bool = c.call("lockunspent", &[false.into(), reserve.into()])?;
+				anyhow::ensure!(ok, "could not reserve stored payout inputs");
+			}
+			Ok(())
 		}).await
 	}
 
