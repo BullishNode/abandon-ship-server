@@ -31,19 +31,34 @@ consume one receipt set.
 ## Restore
 
 Stop all captaind, watchmand and sidecar writers. Preserve the current journal
-and state database independently of the restored captaind backup. Run:
+and state database independently of the restored captaind backup. Use this
+launcher for every captaind start in the RPC-adapter deployment:
 
 ```
-abandon-ship-server config.toml --export-settlement-ids /path/settlements.ids
+contrib/start-captaind.sh sidecar.toml captaind.toml /path/settlements.ids
 ```
 
-This closes the local signed-before-journal window and atomically exports all
-local claims plus journal IDs. Set captaind's top-level `settlement_replay_ids`
-to that current file before restarting. Its import commits before any worker or
+`SIDECAR_BIN` and `CAPTAIND_BIN` can select binaries outside `PATH`. The launcher
+runs `--export-settlement-ids`, closing the local signed-before-journal window
+and atomically exporting all local claims plus journal IDs. Export takes the
+sidecar leader lock and needs its DB and journal, not Core or the admin RPC.
+Failure prevents captaind execution even if an old export file exists. The
+launcher overrides `BARK_SERVER__SETTLEMENT_REPLAY_IDS` with the new export path;
+a stale or omitted path in captaind's config cannot select a different file.
+
+The native import commits before any worker or
 listener. Missing VTXOs, confirmed exits, conflicting Ark spends and unfinished
 participations stop startup. Restore the corresponding captaind history or
 resolve the recorded round offline; payout IDs cannot reconstruct lost transfers.
-An omitted or stale export is not automatically detected before startup.
+An empty initialized installation exports zero IDs and starts normally. Core
+being unavailable does not block DB protection; captaind still requires Core
+before starting its normal workers and listener. Retry the launcher when Core
+returns. No marker table or override to bypass export is used.
+
+Running raw `captaind start` with an old/omitted replay input bypasses this
+launcher and is unsafe for this deployment. Restoring both the state DB and
+journal to stale copies cannot reveal claims missing from both; they must be
+preserved independently of the captaind backup.
 
 Then start watchmand and the sidecar. Remote receipts recreate missing local
 rows; the independent journal reattaches their original signed transactions.
@@ -63,9 +78,8 @@ Cutover is a stopped-writer operation, not a rolling mixed deployment:
 2. Copy existing `sidecar.payout` and `sidecar.quarantine` tables to the new state
    database, preserving raw transactions, states, amounts and addresses. Point
    the adapter at the same current journal. Do not copy or continue the ban loop.
-3. Install captaind's receipt table, export every copied claim/journal ID and
-   configure startup replay. Existing unclaimed bans may expire normally.
-4. Start patched captaind, then watchmand and one adapter. Check replay count,
+3. Install captaind's receipt table. Existing unclaimed bans may expire normally.
+4. Start patched captaind through the launcher, then watchmand and one adapter. Check replay count,
    reconciliation and original transaction IDs before opening normal operation.
 
 The isolated cutover rehearsal uses stock captaind and actual direct-DB claims
