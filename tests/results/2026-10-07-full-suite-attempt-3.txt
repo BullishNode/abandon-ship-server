@@ -1,0 +1,60 @@
+Full baseline run, 2026-10-07: 24 PASS / 0 FAIL, exit 0.
+Frozen source b9d60ab683ebaf495b86462093ec0132d601f8ea.
+Rust is unchanged from 93d31fbcf20366a2ac68b38ebd40faf153858525.
+Cargo test: 4 PASS / 0 FAIL; locked build PASS.
+Project abandon-verify; retained independent volumes, original abandon-regtest untouched.
+This is the pre-feature baseline, before the two cycle4 scenarios are registered.
+The driver prints each result as it completes, then repeats its final table.
+Raw logs/configs/image and script hashes:
+~/bark-integration-2026-10-01/session2-continuation/clean-verification/full-1791403779/
+
+schema-version         PASS    8s  
+happy-single           PASS   84s  
+happy-batch            PASS   90s  
+shared-address         PASS   88s  
+unclaimed-delegated    PASS   94s  
+race-held-lock         PASS   97s  
+race-user-refresh      PASS  198s  
+race-operator-unban    PASS  145s  
+h2-probe               PASS  525s  
+exit-full              PASS   80s  
+exit-breaker           PASS  133s  
+exit-blocked           PASS   88s  
+attack-ban-wait        PASS  154s  
+tamper-payout          PASS   86s  
+db-restore             PASS  114s  
+crash-signed           PASS  130s  
+fee-pct-rule           PASS   98s  
+fee-stuck-claim        PASS  146s  
+fee-window             PASS  212s  
+fee-no-estimate        PASS  124s  
+circuit-breaker        PASS  107s  
+infra-bitcoind         PASS  109s  
+infra-postgres         PASS  128s  
+web-journey            PASS  112s  
+
+schema-version         PASS    8s  
+happy-single           PASS   84s  
+happy-batch            PASS   90s  
+shared-address         PASS   88s  
+unclaimed-delegated    PASS   94s  
+race-held-lock         PASS   97s  
+race-user-refresh      PASS  198s  
+race-operator-unban    PASS  145s  
+h2-probe               PASS  525s  
+exit-full              PASS   80s  
+exit-breaker           PASS  133s  
+exit-blocked           PASS   88s  
+attack-ban-wait        PASS  154s  
+tamper-payout          PASS   86s  
+db-restore             PASS  114s  
+crash-signed           PASS  130s  
+fee-pct-rule           PASS   98s  
+fee-stuck-claim        PASS  146s  
+fee-window             PASS  212s  
+fee-no-estimate        PASS  124s  
+circuit-breaker        PASS  107s  
+infra-bitcoind         PASS  109s  
+infra-postgres         PASS  128s  
+web-journey            PASS  112s  
+full suite exit 0
