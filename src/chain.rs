@@ -114,6 +114,28 @@ impl Chain {
 		}).await
 	}
 
+	/// Reserve any still-unspent inputs of a stored payout. Wallet locks are
+	/// rebuilt from the durable transaction after a node or sidecar restart.
+	pub async fn reserve_inputs(&self, raw: &[u8]) -> anyhow::Result<()> {
+		let tx: Transaction = bitcoin::consensus::deserialize(raw)?;
+		self.run(move |c| {
+			let locked: Vec<serde_json::Value> = c.call("listlockunspent", &[])?;
+			let mut reserve = Vec::new();
+			for input in tx.input {
+				let op = input.previous_output;
+				let entry = serde_json::json!({"txid": op.txid.to_string(), "vout": op.vout});
+				if locked.contains(&entry) { continue; }
+				let unspent: serde_json::Value = c.call("gettxout", &[op.txid.to_string().into(), op.vout.into(), true.into()])?;
+				if !unspent.is_null() { reserve.push(entry); }
+			}
+			if !reserve.is_empty() {
+				let ok: bool = c.call("lockunspent", &[false.into(), reserve.into()])?;
+				anyhow::ensure!(ok, "could not reserve stored payout inputs");
+			}
+			Ok(())
+		}).await
+	}
+
 	/// Broadcast; "already in mempool / known" counts as success.
 	pub async fn broadcast(&self, raw: Vec<u8>) -> anyhow::Result<()> {
 		let hex = bitcoin::hex::DisplayHex::to_lower_hex_string(&raw[..]);

@@ -1,0 +1,22 @@
+Gap149, 2026-10-07
+
+Before: FAIL212s, exit1, at eligible-B progress and rejected-A input reservation.
+After isolated stage149: PASS185s, exit0.
+After integration on main: PASS, exit0, abandon-verify retained stack.
+Integrated cargo: 4 PASS / 0 FAIL; build PASS.
+Binary SHA256: 7438f3aaebf4db137c38d5d2e7bc88af60f1216fb602324789145024572ae51d.
+
+The scenario stores A's transaction before its journal append, then uses
+Core prioritisetransaction to make testmempoolaccept reject it for its fee.
+A separate funding input must let B pay while every input reserved by A stays
+locked. Removing the rejection must broadcast A's original transaction.
+Both recipients' outputs and one-payment/ledger invariants are checked.
+This injects fee rejection; it does not fill a real mempool.
+
+Logs and manifests:
+~/bark-integration-2026-10-01/session2-continuation/
+  oct7-149-before-1791402495390964308/
+  oct7-149-after-1791402721170113860/
+  clean-verification/integrated-149-1791407131160707848/
+The integrated build refreshed copied source timestamps before compiling;
+an initial stale-cache invocation is retained locally and is not its evidence.

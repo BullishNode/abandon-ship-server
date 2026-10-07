@@ -295,8 +295,10 @@ async fn pay_claimed(
 /// Broadcast stored txs (crash recovery) and mark confirmed ones.
 async fn settle_inflight(db: &mut tokio_postgres::Client, chain: &chain::Chain) -> anyhow::Result<()> {
 	for (txid, raw) in db::txs_in_state(db, "signed").await? {
-		chain.broadcast(raw).await?;
-		db::set_state_by_txid(db, &txid, "signed", "broadcast").await?;
+		match chain.broadcast(raw).await {
+			Ok(()) => db::set_state_by_txid(db, &txid, "signed", "broadcast").await?,
+			Err(e) => warn!(%txid, "stored payout not accepted; retrying next tick: {e:#}"),
+		}
 	}
 	for (txid, raw) in db::txs_in_state(db, "broadcast").await? {
 		let confs = chain.confirmations(&txid).await.unwrap_or(0);
@@ -310,5 +312,13 @@ async fn settle_inflight(db: &mut tokio_postgres::Client, chain: &chain::Chain) 
 			}
 		}
 	}
+	// Replay parents before reserving: their change outputs may only become
+	// known after rebroadcast, and can already belong to a stored child tx.
+	for state in ["signed", "broadcast"] {
+		for (_, raw) in db::txs_in_state(db, state).await? {
+			chain.reserve_inputs(&raw).await?;
+		}
+	}
+
 	Ok(())
 }

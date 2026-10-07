@@ -1,0 +1,14 @@
+   Compiling abandon-ship-server v0.1.0 (/home/francis/abandon-ship-server-main)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.06s
+     Running unittests src/main.rs (target/debug/deps/abandon_ship_server-2b490714e97dbbef)
+
+running 4 tests
+test checks::tests::affordability ... ok
+test checks::tests::sweep_only_to_sweep_scripts ... ok
+test checks::tests::payout_verification ... ok
+test journal::tests::survives_reopen ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Compiling abandon-ship-server v0.1.0 (/home/francis/abandon-ship-server-main)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.03s

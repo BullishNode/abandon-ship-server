@@ -100,7 +100,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | 66 | bitcoind RPC slow (seconds per call): tick takes minutes | Ticks never overlap (sequential loop) | todo |
 | 67 | Postgres connection pool exhausted by captaind | Sidecar uses one connection; errors retried | todo |
 | 68 | Payout batch near the 100 kvB standardness limit | `max_batch` × output size stays under the limit | todo |
-| 69 | Mempool full: payout rejected (min relay fee rises) | Broadcast error retried; no rebuild | gap (as 149) |
+| 69 | Mempool full: payout rejected (min relay fee rises) | Broadcast error retried; no rebuild | fixed (broadcast-rejected; Core fee rejection is injected with prioritisetransaction) |
 | 70 | Log flooding: a warn per coin per tick for stuck coins | Bounded by `max_batch`; acceptable | todo |
 
 ## Batch 8: "Kill it" (crashes, restarts, process lifecycle)
@@ -249,7 +249,7 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 | 146 | barkd restarts after adopting the spent state, before the sweep | Spent state and payout survive the restart | pass (`web-journey`) |
 | 147 | barkd image rebuilt from the current fork mid-programme (client upgraded while a payout is outstanding) | The journey still works on the new build | pass (`web-journey` on the rebuilt image) |
 | 148 | Payout wallet fragmented after months of small top-ups: funding picks many inputs, so each output's fee share exceeds the bound | Batch deferred; while it lasts the claimed rows count against `max_batch` | gap: operator consolidates the wallet; `payout deferred` is logged every tick |
-| 149 | Full mempool: mempool min fee above bitcoind's estimate; a stored `signed` tx is rejected | No rebuild; stored tx retried | gap: `settle_inflight` aborts the whole tick while the stored tx is rejected (no claims, no confirmations) and resumes when the mempool clears; going on instead would let the wallet reuse that tx's inputs and strand its coins |
+| 149 | Core rejects a stored `signed` payout for its fee | Reserve its inputs and retry the original transaction while other entitlements progress | fixed (broadcast-rejected; before FAIL, after PASS; uses prioritisetransaction rather than filling the mempool) |
 | 150 | Many rounds expire in one block: one `gettxout` + `getrawtransaction` per coin, not per anchor | Tick time bounded by the candidate window | n/a: bounded by `max_batch` × 20 payable coins |
 | 151 | captaind is upgraded while payouts are claimed but not broadcast | Schema check stops ticks; claimed coins stay spent; nothing rebuilt; resumes on the new allowlist | pass (code: the schema check runs before settle and claim) |
 | 152 | A user refreshed through many rounds before going offline | Only the last coin is a candidate; older ones are `spent` in a round | pass (`spend_state` filter) |
