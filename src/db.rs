@@ -279,3 +279,9 @@ pub async fn check_invariants(db: &Client) -> anyhow::Result<()> {
 	anyhow::ensure!(orphans == 0, "invariant violated: {orphans} paid coin row(s) deleted from vtxo");
 	Ok(())
 }
+
+pub async fn receipt_amounts(db: &Client, txid: &str) -> anyhow::Result<Vec<(String, u64)>> {
+	db.query("SELECT address, sum(amount_sat)::bigint AS amount FROM sidecar.payout
+		WHERE txid = $1 GROUP BY address", &[&txid]).await?.into_iter()
+		.map(|r| Ok((r.try_get("address")?, r.try_get::<_, i64>("amount")? as u64))).collect()
+}

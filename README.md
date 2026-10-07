@@ -25,6 +25,8 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
    - one output per address, fee subtracted from the outputs, funded at the checked rate;
    - verify the tx: exact outputs, at most one change output owned by the wallet, per-output fee share;
    - store it in the DB, then append it to the journal (one atomic line per batch, with its raw transaction; fsync), then broadcast.
+Fee metadata is written atomically to `<journal stem>.receipts/<txid>.json`; failure logs a warning and payment continues. Each recipient output has its net amount and exact mining-fee deduction, combining coins with the same key.
+
 7. **Invariants.** Every paid coin is `spent` with no round, arkoor or offboard spend recorded, and no paid coin row is missing. A violation exits the process.
 
 ## Config
@@ -36,6 +38,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
 ```sh
 cargo run --release -- config.toml           # loop
 cargo run --release -- config.toml --once    # one tick
+cargo run --release -- config.toml --export-receipts # regenerate fee metadata, no payment writes
 RUST_LOG=abandon_ship_server=debug ...       # logs why each coin waits
 ```
 

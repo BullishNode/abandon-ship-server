@@ -37,6 +37,7 @@ impl Journal {
 		Ok(Journal { path: path.to_owned(), paid, raw, complete_len, confirmed: HashSet::new() })
 	}
 
+	pub fn txids(&self) -> impl Iterator<Item = String> + '_ { self.paid.values().cloned() }
 	pub fn ids(&self) -> Vec<String> { self.paid.keys().cloned().collect() }
 	pub fn contains(&self, id: &str) -> bool { self.paid.contains_key(id) }
 	pub fn txid(&self, id: &str) -> Option<&str> { self.paid.get(id).map(String::as_str) }

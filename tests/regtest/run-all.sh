@@ -8,7 +8,7 @@ SCENARIOS=(${@:-schema-version happy-single happy-batch shared-address unclaimed
 	race-held-lock race-user-refresh race-operator-unban claim-gates h2-probe
 	exit-full exit-breaker exit-blocked attack-ban-wait
 	tamper-payout db-restore restore-retry restore-postgres restore-missing-history restore-startup restore-kill restore-mixed-batch restore-gate crash-signed broadcast-rejected
-	fee-pct-rule fee-stuck-claim fee-window wait-window fee-fragmented fee-fragmented-progress fee-no-estimate circuit-breaker infra-bitcoind infra-postgres
+	fee-receipts fee-pct-rule fee-stuck-claim fee-window wait-window fee-fragmented fee-fragmented-progress fee-no-estimate circuit-breaker infra-bitcoind infra-postgres
 	seed-sparse web-journey})
 
 (cd "$ROOT" && cargo build -q) || { echo "build failed"; exit 2; }

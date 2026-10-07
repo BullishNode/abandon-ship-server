@@ -68,6 +68,23 @@ impl Chain {
 		}).await
 	}
 
+	/// Actual mining fee, reconstructed from the funding transactions.
+	pub async fn transaction_fee(&self, tx: &Transaction) -> anyhow::Result<u64> {
+		let mut parents = std::collections::HashMap::new();
+		let mut input_sat = 0u64;
+		for input in &tx.input {
+			let op = input.previous_output;
+			if !parents.contains_key(&op.txid) {
+				parents.insert(op.txid, self.tx(op.txid).await?.0);
+			}
+			let output = parents[&op.txid].output.get(op.vout as usize)
+				.ok_or_else(|| anyhow::anyhow!("receipt input out of bounds"))?;
+			input_sat += output.value.to_sat();
+		}
+		input_sat.checked_sub(tx.output.iter().map(|o| o.value.to_sat()).sum())
+			.ok_or_else(|| anyhow::anyhow!("negative receipt transaction fee"))
+	}
+
 	/// true if the outpoint is currently unspent (or unknown) per bitcoind.
 	pub async fn is_unspent(&self, op: OutPoint) -> anyhow::Result<bool> {
 		self.run(move |c| {

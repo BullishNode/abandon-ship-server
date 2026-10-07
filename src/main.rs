@@ -6,8 +6,9 @@ mod checks;
 mod config;
 mod db;
 mod journal;
+mod receipt;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -57,7 +58,10 @@ async fn main() -> anyhow::Result<()> {
 
 	let mut args = std::env::args().skip(1);
 	let cfg_path = PathBuf::from(args.next().unwrap_or_else(|| "config.toml".into()));
-	let once = args.any(|a| a == "--once");
+	let flags: Vec<_> = args.collect();
+	anyhow::ensure!(flags.iter().all(|a| a == "--once" || a == "--export-receipts"), "unknown argument");
+	let once = flags.iter().any(|a| a == "--once");
+	let receipts_only = flags.iter().any(|a| a == "--export-receipts");
 	let cfg = Config::load(&cfg_path)?;
 	let sweep_spks = cfg.policy.sweep_addresses.iter()
 		.map(|a| Ok(Address::from_str(a)?.require_network(cfg.network)
@@ -69,6 +73,21 @@ async fn main() -> anyhow::Result<()> {
 	// Exactly one instance.
 	anyhow::ensure!(db::try_lead(&db).await?, "another sidecar instance holds the leader lock");
 	db::check_tables(&db).await?;
+	if receipts_only {
+		let chain = chain::Chain::new(&cfg.bitcoind.url, &cfg.bitcoind.user, &cfg.bitcoind.pass)?;
+		let journal = journal::Journal::open(&cfg.journal_path)?;
+		let txids = db::paid_ids(&db).await?.into_iter().map(|(_, txid, _)| txid)
+			.chain(journal.txids()).collect::<BTreeSet<_>>();
+		let mut failed = 0;
+		for txid in txids {
+			if let Err(e) = ensure_receipt(&cfg, &db, &chain, &txid).await {
+				warn!(%txid, "receipt export failed: {e:#}");
+				failed += 1;
+			}
+		}
+		anyhow::ensure!(failed == 0, "{failed} payout receipts could not be exported");
+		return Ok(());
+	}
 	// Earlier builds quarantined the whole round. Reconsider those coins
 	// under the exact-path rule; every payout still requires chain evidence.
 	db.execute("DELETE FROM sidecar.quarantine WHERE reason LIKE 'round partially unrolled by %'", &[]).await?;
@@ -112,7 +131,7 @@ async fn tick(
 	stats.tip = Some(tip);
 
 
-	settle_inflight(db, chain, journal, stats).await?;
+	settle_inflight(cfg, db, chain, journal, stats).await?;
 
 	// Fee gate: bitcoind's real estimate only, no fallback rate, ever. No
 	// estimate: no new claims or transactions. Stored payouts were retried above.
@@ -394,6 +413,9 @@ async fn pay_claimed(
 				.map(|p| p.vtxo_id.clone()).collect();
 			db::mark_signed(db, &ids, &txid, &built.raw).await?; // persisted before broadcast
 			journal.record(&ids, &txid, &built.raw)?;            // and on local disk
+			if let Err(e) = receipt::write(&cfg.journal_path.with_extension("receipts"), &built.tx, &expected, built.fee_sat) {
+				warn!(%txid, "fee receipt unavailable; payout remains recoverable: {e:#}");
+			}
 			chain.broadcast(built.raw).await?;
 			stats.payouts_broadcast += 1;
 			db::set_state_by_txid(db, &txid, "broadcast").await?;
@@ -406,9 +428,12 @@ async fn pay_claimed(
 
 /// Retry every journaled transaction until confirmed, including lost DB rows.
 async fn settle_inflight(
-	db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal, stats: &mut TickStats,
+	cfg: &Config, db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal, stats: &mut TickStats,
 ) -> anyhow::Result<()> {
 	for (txid, raw) in journal.pending_transactions()? {
+		if let Err(e) = ensure_receipt(cfg, db, chain, &txid).await {
+			warn!(%txid, "fee receipt unavailable; retrying payment independently: {e:#}");
+		}
 		let confs = chain.confirmations(&txid).await.unwrap_or(0);
 		if confs >= 6 {
 			db::set_state_by_txid(db, &txid, "confirmed").await?;
@@ -431,4 +456,20 @@ async fn settle_inflight(
 	}
 
 	Ok(())
+}
+
+async fn ensure_receipt(
+	cfg: &Config, db: &tokio_postgres::Client, chain: &chain::Chain, txid: &str,
+) -> anyhow::Result<()> {
+	let directory = cfg.journal_path.with_extension("receipts");
+	if directory.join(format!("{txid}.json")).try_exists()? {
+		// A prior rename may have succeeded before its directory sync failed.
+		std::fs::File::open(&directory)?.sync_all()?;
+		return Ok(());
+	}
+	let tx = bitcoin::consensus::deserialize(&db::raw_tx(db, txid).await?)?;
+	let expected = db::receipt_amounts(db, txid).await?.into_iter().map(|(address, amount)| {
+		Ok((Address::from_str(&address)?.require_network(cfg.network)?.script_pubkey(), amount))
+	}).collect::<anyhow::Result<Vec<_>>>()?;
+	receipt::write(&directory, &tx, &expected, chain.transaction_fee(&tx).await?)
 }

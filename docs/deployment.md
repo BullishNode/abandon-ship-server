@@ -17,7 +17,7 @@ The connection has no TLS. Run the sidecar on the Postgres host, or reach Postgr
 
 ## bitcoind (payout wallet)
 
-- **Wallets.** `payout` must be the only wallet on this node. captaind and watchmand use their own internal wallets.
+- **Wallets.** Point the RPC URL at the loaded `payout` wallet (`/wallet/payout`). Other Core wallets may be loaded; captaind and watchmand use their own internal wallets.
 - **Wallet loading.** Create it with `load_on_startup=true`. The sidecar checks it every tick.
 - **Indexes.** `txindex=1`.
 - **Float.** Keep it small; top it up from the watchman sweep address.
@@ -55,3 +55,23 @@ The gate permits a fresh installation only when the journal exists and is empty,
 Missing or conflicting Ark history, including unfinished round participation, stops the sidecar before a new marker: restore the matching backup/WAL or repair the round offline first. A payment journal cannot reconstruct missing transfers. `--once` reports a failed payment tick with a nonzero exit even when DB reassertion completed; use the fresh marker to distinguish those results.
 
 Restored claimed rows sharing a transaction reattach its original bytes in one database transaction. Missing transaction bytes stop recovery with the coin and transaction IDs; recover those bytes from the payout database or independent journal backup. Transactions whose payout rows are absent stay in the journal retry queue. Temporary broadcast rejection retains their funding inputs and does not remove the obligation.
+
+## Client fee receipts
+
+Publish only `journal_path` with its extension replaced by `.receipts`, at
+`/expiry-payouts/<txid>.json` on the Ark HTTP origin. Never serve the adjacent
+journal. Each JSON file contains `txid` and `outputs` entries with `vout`,
+`amount_sat` (net) and `fee_sat` (original payout mining-fee deduction).
+Coins sharing a key share an output and combined deduction; change is omitted.
+The client’s later spend has its own separate mining fee.
+
+Files are atomically renamed and fsynced. Publication errors warn without
+blocking payment. Pending payment retries recreate missing files. To rebuild
+confirmed files, stop the sidecar and run
+`abandon-ship-server config.toml --export-receipts`, then restart it. Export
+reads the DB, journal and Core, holds the leader lock, and writes receipt files
+without reconciling or altering the payment ledger. It attempts all known
+transactions and exits nonzero if any receipt cannot be reconstructed.
+Keep payout metadata when restoring: missing or incomplete entitlement records
+can prevent exact fee reconstruction even while the payment remains recoverable.
+Missing fee metadata must appear as unknown in the client, never as zero.

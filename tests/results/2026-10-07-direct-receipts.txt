@@ -1,0 +1,25 @@
+Direct-sidecar payout fee receipts — 2026-10-07
+
+Candidate rebased onto current main plus pagination: 11 unit PASS / 0 FAIL,
+build PASS. Immutable binary SHA256:
+331939a5645e675ea4908a482b213a8a0f17c992ae65c88d1bae63fa17b14216.
+Scenario fee-receipts: PASS 112.372s, exit0.
+Observation 20261007T233019-a38de902, isolated abandon-verify regtest.
+
+Two actual arkoor coins to a reused key, in a five-coin payout batch with
+previous unpaid obligations. Blocking receipt publication does not stop the
+payment; the next tick regenerates the receipt after the path is restored.
+Core input-minus-output fee: 1130 sat, exactly the recipients' deduction.
+Payout 5f0d699b90253d0c399f3a7c0b6e5c901dd334f2d2d6aa9c0c1a1451ed9a2f7b.
+Independent common oracle decodes stored VTXOs and real funding transactions;
+receipt matches outputs and combined shared-key deductions, excluding change.
+Deleting the selected receipt and running --export-receipts restores identical
+JSON without changing journal bytes or payment-row hashes.
+
+Limit: the complete export returned exit1 for four unrelated historical
+journal-only transactions whose payout metadata was removed by previous
+restore tests. The selected receipt did regenerate correctly. This is not a
+complete historical export pass, browser journey or signet result.
+Pending transaction retries regenerate missing receipts; confirmed missing
+files require explicit export. The command holds the sidecar leader lock,
+so stop the daemon before running it.
