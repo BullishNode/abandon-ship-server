@@ -1,0 +1,47 @@
+Fragmented funding and claim progress, 2026-10-07
+
+Before: main b9a48067dad22ecbdf1c8f0851b736e251c20acf.
+Binary SHA256: 7438f3aaebf4db137c38d5d2e7bc88af60f1216fb602324789145024572ae51d
+After: this commit's src/main.rs and src/chain.rs, built with cargo --locked.
+Binary SHA256: 55becb3baaffe6a8801909b1364b0599a39f4486d86d38b80a92f58eb7a77665
+Stack: isolated abandon-verify, Bitcoin Core 31, stock captaind 6768e0fb4.
+Original abandon-regtest volumes unchanged.
+
+Case: A can only be funded with many small inputs, exceeding its actual fee cap.
+B arrives later and can use one 31,000-sat input. B must pay while A waits;
+unlocking suitable funding must then pay A with one journaled transaction.
+The recipient percentage cap is unchanged between implementations.
+
+Exact results:
+- Before, batch1: FAIL / exit1, 116.3s. B did not progress or receive a transaction.
+- After, batch1: PASS / exit0.
+- After, batch2: PASS / exit0, 110.8s.
+- Staged identical Rust: fee-fragmented PASS; progress batch1 PASS; batch2 PASS.
+- cargo test --locked: 4 PASS / 0 FAIL. cargo build --locked: PASS.
+
+An initial integrated after-run failed / exit1 in133.2s. The preceding intentional
+before-failure left B unpaid; that earlier obligation consumed the next case's
+31,000-sat funding input. The log identifies the earlier ID and payment. The
+corrected driver settles outstanding obligations before creating/locking each
+fixture, using the same after binary. It does not delete claims or raise caps.
+Both isolated after cases passed. Retain the failed run as fixture evidence;
+do not count it as a passing run.
+
+Earlier candidate experiments retained separately: fee-derived maximum weight
+without explicit selection failed in294s; largest-first selection with that
+extra bound passed batch1/2. The final implementation removes the redundant
+bound, uses safe unlocked inputs largest first, and retains actual-fee checks.
+
+Private durable artifacts: session2-continuation/clean-verification/
+selection-main-before-1791408336007796599/ and selection-main-after-*/,
+selection-main-after-two-*/. Driver summaries:
+2026-10-07/selection-main-driver.txt (includes the contaminated after-run),
+2026-10-07/selection-main-isolated-driver.txt (clean after cases),
+2026-10-07/selection-d-driver.txt (three staged cases).
+
+after: expected 0; binary 55becb3baaffe6a8801909b1364b0599a39f4486d86d38b80a92f58eb7a77665; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/selection-main-after-1791408663013896005
+PASS fee-fragmented-progress
+after: exit 0; duration 151.4s
+after-two: expected 0; binary 55becb3baaffe6a8801909b1364b0599a39f4486d86d38b80a92f58eb7a77665; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/clean-verification/selection-main-after-two-1791408832671147072
+PASS fee-fragmented-progress
+after-two: exit 0; duration 110.8s

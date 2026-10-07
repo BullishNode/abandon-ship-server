@@ -126,12 +126,11 @@ async fn tick(
 		return Ok(());
 	};
 
-	// Never pile up claims: claimed coins payable at this rate take up the
-	// batch. Ones that fees made unaffordable wait without blocking others.
+	// Pay existing claims first. An estimate alone must not let a claim that
+	// fails the actual fee check occupy the batch forever.
+	if pay_claimed(cfg, db, chain, journal, fee_rate).await? { return Ok(()) }
 	let share = checks::fee_share_bound(fee_rate);
-	let payable = db::claimed_payouts(db).await?.iter()
-		.filter(|c| checks::affordable(c.amount_sat, share, p.max_fee_pct_per_payout)).count() as i64;
-	let mut claims_left = p.max_batch - payable;
+	let mut claims_left = p.max_batch;
 	let mut quarantined: u64 = 0;
 	let mut unrolled = std::collections::HashSet::new();
 	// Coins unaffordable at this rate are left out before the candidate
@@ -162,7 +161,8 @@ async fn tick(
 		db::quarantine(db, &c.vtxo_id, &reason).await?;
 	}
 
-	pay_claimed(cfg, db, chain, journal, fee_rate).await
+	pay_claimed(cfg, db, chain, journal, fee_rate).await?;
+	Ok(())
 }
 
 async fn process_coin(
@@ -236,60 +236,88 @@ async fn process_coin(
 	})
 }
 
-/// Batch all claimed coins into one tx: verify it, store it, then broadcast.
+/// Pay one affordable batch, leaving deferred claims for a later tick.
 async fn pay_claimed(
 	cfg: &Config, db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal,
 	fee_rate: f64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
 	let claimed = db::claimed_payouts(db).await?;
-	if claimed.is_empty() { return Ok(()) }
 	// A claimed row for a coin already in the journal means the ledger was
 	// reset or restored: never pay twice.
 	if let Some(p) = claimed.iter().find(|p| journal.contains(&p.vtxo_id)) {
 		return Err(InvariantViolation(format!("claimed coin {} was already paid (journal)", p.vtxo_id)).into());
 	}
-	// Coins sent to the same Ark address share a key, hence a payout address:
-	// one output per address, carrying the sum.
-	let mut per_address: BTreeMap<String, u64> = BTreeMap::new();
-	for p in &claimed {
-		*per_address.entry(p.address.clone()).or_default() += p.amount_sat;
-	}
-	// Outputs not affordable at this rate stay claimed until fees fall.
 	let share = checks::fee_share_bound(fee_rate);
 	let pct = cfg.policy.max_fee_pct_per_payout;
-	per_address.retain(|_, amt| checks::affordable(*amt, share, pct));
-	if per_address.is_empty() {
-		warn!("claimed payouts not affordable at {fee_rate:.2} sat/vB; waiting");
-		return Ok(());
-	}
-	let ids: Vec<String> = claimed.iter().filter(|p| per_address.contains_key(&p.address))
-		.map(|p| p.vtxo_id.clone()).collect();
-	let mut expected = Vec::with_capacity(per_address.len());
-	for (addr, amt) in &per_address {
-		let spk = Address::from_str(addr)?.require_network(cfg.network)?.script_pubkey();
-		expected.push((spk, *amt));
-	}
+	for batch in claimed.chunks(cfg.policy.max_batch as usize) {
+		// Coins that share a payout address share one output.
+		let mut per_address: BTreeMap<String, u64> = BTreeMap::new();
+		for p in batch {
+			*per_address.entry(p.address.clone()).or_default() += p.amount_sat;
+		}
+		per_address.retain(|_, amt| checks::affordable(*amt, share, pct));
+		while !per_address.is_empty() {
+			let mut expected = Vec::with_capacity(per_address.len());
+			for (addr, amt) in &per_address {
+				let spk = Address::from_str(addr)?.require_network(cfg.network)?.script_pubkey();
+				expected.push((spk, *amt));
+			}
 
-	let built = chain.build_payout(per_address.into_iter().collect(), fee_rate).await?;
-	// Refuse anything that is not exactly the intended payout.
-	let change = match checks::verify_payout(&built.tx, &expected, built.fee_sat, pct) {
-		Ok(c) => c,
-		Err(e) => {
-			warn!("payout deferred: {e:#}");
-			return Ok(());
-		},
-	};
-	if let Some(spk) = change {
-		anyhow::ensure!(chain.is_mine(spk, cfg.network).await?, "payout change output is not ours");
-	}
+			let built = match chain.build_payout(per_address.clone().into_iter().collect(), fee_rate).await {
+				Ok(built) => built,
+				Err(e) => {
+					warn!("payout funding deferred: {e:#}");
+					if per_address.len() > 1 && (e.to_string().contains("Insufficient funds")
+						|| e.to_string().contains("maximum weight")) {
+						let largest = per_address.iter().max_by_key(|(_, amount)| *amount).unwrap().0.clone();
+						per_address.remove(&largest);
+						continue;
+					}
+					break;
+				},
+			};
+			// Remove one rejected output at a time. A large output may require
+			// many small inputs, making even a smaller, individually payable
+			// output fail when both share that batch's fee.
+			let mut rejected: Option<(String, u64)> = None;
+			for ((addr, amount), (spk, _)) in per_address.iter().zip(&expected) {
+				if let Some(output) = built.tx.output.iter().find(|o| &o.script_pubkey == spk) {
+					let value = output.value.to_sat();
+					if value <= *amount && !checks::affordable(*amount, amount - value, pct)
+						&& rejected.as_ref().is_none_or(|(_, largest)| amount > largest) {
+						rejected = Some((addr.clone(), *amount));
+					}
+				}
+			}
+			if let Some((addr, _)) = rejected {
+				per_address.remove(&addr);
+				warn!("payout deferred for an output above the actual fee bound");
+				continue;
+			}
+			// Refuse anything that is not exactly the intended payout.
+			let change = match checks::verify_payout(&built.tx, &expected, built.fee_sat, pct) {
+				Ok(c) => c,
+				Err(e) => {
+					warn!("payout deferred: {e:#}");
+					break;
+				},
+			};
+			if let Some(spk) = change {
+				anyhow::ensure!(chain.is_mine(spk, cfg.network).await?, "payout change output is not ours");
+			}
 
-	let txid = built.tx.compute_txid().to_string();
-	db::mark_signed(db, &ids, &txid, &built.raw).await?; // persisted before broadcast
-	journal.record(&ids, &txid, &built.raw)?;            // and on local disk
-	chain.broadcast(built.raw).await?;
-	db::set_state_by_txid(db, &txid, "signed", "broadcast").await?;
-	info!(%txid, coins = ids.len(), fee = built.fee_sat, "payout broadcast");
-	Ok(())
+			let txid = built.tx.compute_txid().to_string();
+			let ids: Vec<String> = batch.iter().filter(|p| per_address.contains_key(&p.address))
+				.map(|p| p.vtxo_id.clone()).collect();
+			db::mark_signed(db, &ids, &txid, &built.raw).await?; // persisted before broadcast
+			journal.record(&ids, &txid, &built.raw)?;            // and on local disk
+			chain.broadcast(built.raw).await?;
+			db::set_state_by_txid(db, &txid, "signed", "broadcast").await?;
+			info!(%txid, coins = ids.len(), fee = built.fee_sat, "payout broadcast");
+			return Ok(true);
+		}
+	}
+	Ok(false)
 }
 
 /// Broadcast stored txs (crash recovery) and mark confirmed ones.

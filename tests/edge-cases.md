@@ -34,7 +34,7 @@ Status: `todo` · `pass` · `fixed` (bug found and fixed) · `n/a` (not testable
 | --- | --- | --- | --- |
 | 21 | Postgres down mid-tick | Tick errors, retried; no half state | pass: exits, supervisor restarts (`infra-postgres`) |
 | 22 | bitcoind down | Tick errors, retried | fixed: wallet checked every tick (`infra-bitcoind`) |
-| 23 | Payout wallet empty | Claims wait as `claimed` (at most `max_batch` payable ones); no crash loop | pass |
+| 23 | Payout wallet empty | Claims remain durable; funding failures defer that batch | pass |
 | 24 | Fee estimate spikes | The per-coin fee rule defers the batch | pass |
 | 25 | Watchman down for a long time | No sweep, so nothing paid | pass |
 | 26 | captaind upgraded (schema version changes) | Sidecar refuses to start | pass (`schema-version`) |
@@ -216,7 +216,7 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 
 | # | Case | Expected | Status |
 | --- | --- | --- | --- |
-| 121 | Owner's small coin is claimed at a low fee rate; fees rise, it is no longer affordable and stays `claimed` | Other expired coins are still claimed and paid; the small one is paid when fees fall | fixed: only payable claims count against `max_batch` (`fee-stuck-claim`) |
+| 121 | Owner's small coin is claimed at a low fee rate; fees rise, it is no longer affordable and stays `claimed` | Other expired coins are still claimed and paid; the small one is paid when fees fall | fixed: deferred claims do not prevent new claims (`fee-stuck-claim`) |
 | 122 | Owner arkoor-sends an expired, swept coin before the sidecar bans it | Refused (captaind refuses arkoor of expired coins unless `allow_expired_arkoor`); paid once; never more than the coin's amount for the coin and its children | pass (`attack-ban-wait`) |
 | 123 | Owner arkoor-sends the coin during the ban wait | Refused; paid once | pass (`attack-ban-wait`) |
 | 124 | Owner offboards the coin during the ban wait | Refused ("banned until block"); paid once | pass (`attack-ban-wait`) |
@@ -248,7 +248,7 @@ The attacker holds some coins and runs any client; captaind, its DB and the side
 | 145 | The sidecar's bitcoind lags captaind's chain by more than `ban_blocks` | The ban is already past in captaind's view, so the wait does not block refreshes; the claim still needs a spendable coin | n/a: liveness only (as #2); one operator runs both nodes |
 | 146 | barkd restarts after adopting the spent state, before the sweep | Spent state and payout survive the restart | pass (`web-journey`) |
 | 147 | barkd image rebuilt from the current fork mid-programme (client upgraded while a payout is outstanding) | The journey still works on the new build | pass (`web-journey` on the rebuilt image) |
-| 148 | Payout wallet fragmented after months of small top-ups: funding picks many inputs, so each output's fee share exceeds the bound | Batch deferred; while it lasts the claimed rows count against `max_batch` | gap: operator consolidates the wallet; `payout deferred` is logged every tick |
+| 148 | Payout wallet fragmented after months of small top-ups: funding picks many inputs, so each output's fee share exceeds the bound | Choose safe unlocked inputs largest first; deferred claims do not block later affordable payouts | fixed (`fee-fragmented-progress`, batch limits 1 and 2) |
 | 149 | Core rejects a stored `signed` payout for its fee | Reserve its inputs and retry the original transaction while other entitlements progress | fixed (broadcast-rejected; before FAIL, after PASS; uses prioritisetransaction rather than filling the mempool) |
 | 150 | Many rounds expire in one block: one `gettxout` + `getrawtransaction` per coin, not per anchor | Tick time bounded by the candidate window | n/a: bounded by `max_batch` × 20 payable coins |
 | 151 | captaind is upgraded while payouts are claimed but not broadcast | Schema check stops ticks; claimed coins stay spent; nothing rebuilt; resumes on the new allowlist | pass (code: the schema check runs before settle and claim) |
