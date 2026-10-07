@@ -1,0 +1,65 @@
+Default logging and tick summaries — 2026-10-07
+
+Before recovery-f: fee-no-estimate FAIL / exit1, 726.5s.
+After logging-a: fee-no-estimate PASS / exit0, 869.6s.
+Integrated cargo test --locked: 8 PASS / 0 FAIL; locked build PASS.
+
+Core fee estimation was actually aged out with empty blocks; no RPC response was mocked. Both unset and invalid RUST_LOG exposed the warning and exactly one tick summary with zero selection/claims. Explicit error suppressed both. The unclaimed coin remained spendable until fee estimates returned, then received and confirmed its payout.
+
+The tested logging-a source predates the independently tested partial-path integration; current main combines them. Its compiled source snapshot is stages/selection-before, SHA256904d704d17febb1eb71be344ab8ff5003177aed5da06bfe24ca5deae6176065c. Final combined suite remains pending.
+
+before: expected 1; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/oct7-logging-before-1791410804827091214
+[fee-no-estimate] ok: estimator empty
+[fee-no-estimate] ok: unset logging tick completed
+[fee-no-estimate] NOT OK: unset filter exposes missing fee estimate
+[fee-no-estimate] NOT OK: unset filter has exactly one tick summary
+[fee-no-estimate] NOT OK: unset summary reports no selection or claims
+[fee-no-estimate] ok: invalid logging tick completed
+[fee-no-estimate] NOT OK: invalid filter exposes missing fee estimate
+[fee-no-estimate] NOT OK: invalid filter has exactly one tick summary
+[fee-no-estimate] NOT OK: invalid summary reports no selection or claims
+[fee-no-estimate] ok: error logging tick completed
+[fee-no-estimate] ok: explicit error level hides warnings
+[fee-no-estimate] ok: explicit error level hides summary
+[fee-no-estimate] ok: no ban
+[fee-no-estimate] ok: no claim
+[fee-no-estimate] ok: still spendable
+[fee-no-estimate] ok: estimate back: paid
+[fee-no-estimate] ok: fe81787d has a payout tx
+[fee-no-estimate] ok: fe81787d payout address = tr(user key)
+[fee-no-estimate] ok: fe81787d output within fee share of 59520 (got 58898)
+[fee-no-estimate] ok: fe81787d spent in captaind
+[fee-no-estimate] ok: fe81787d journaled once, with the ledger txid
+[fee-no-estimate] ok: fe81787d journaled nowhere else
+[fee-no-estimate] ok: every paid coin is spent and nothing else spent it
+[fee-no-estimate] ok: every ledger row with a txid is journaled
+FAIL fee-no-estimate: unset filter exposes missing fee estimate;unset filter has exactly one tick summary;unset summary reports no selection or claims;invalid filter exposes missing fee estimate;invalid filter has exactly one tick summary;invalid summary reports no selection or claims
+before: exit 1; duration 726.5s
+after: expected 0; artifacts /home/francis/bark-integration-2026-10-01/session2-continuation/oct7-logging-after-1791411531333093508
+[fee-no-estimate] ok: estimator empty
+[fee-no-estimate] ok: unset logging tick completed
+[fee-no-estimate] ok: unset filter exposes missing fee estimate
+[fee-no-estimate] ok: unset filter has exactly one tick summary
+[fee-no-estimate] ok: unset summary reports no selection or claims
+[fee-no-estimate] ok: invalid logging tick completed
+[fee-no-estimate] ok: invalid filter exposes missing fee estimate
+[fee-no-estimate] ok: invalid filter has exactly one tick summary
+[fee-no-estimate] ok: invalid summary reports no selection or claims
+[fee-no-estimate] ok: error logging tick completed
+[fee-no-estimate] ok: explicit error level hides warnings
+[fee-no-estimate] ok: explicit error level hides summary
+[fee-no-estimate] ok: no ban
+[fee-no-estimate] ok: no claim
+[fee-no-estimate] ok: still spendable
+[fee-no-estimate] ok: estimate back: paid
+[fee-no-estimate] ok: d8fd181f has a payout tx
+[fee-no-estimate] ok: d8fd181f payout address = tr(user key)
+[fee-no-estimate] ok: d8fd181f output within fee share of 59520 (got 58740)
+[fee-no-estimate] ok: d8fd181f spent in captaind
+[fee-no-estimate] ok: d8fd181f journaled once, with the ledger txid
+[fee-no-estimate] ok: d8fd181f journaled nowhere else
+[fee-no-estimate] ok: every paid coin is spent and nothing else spent it
+[fee-no-estimate] ok: every ledger row with a txid is journaled
+PASS fee-no-estimate
+after: exit 0; duration 869.6s
+EXIT 0

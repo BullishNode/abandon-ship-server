@@ -29,6 +29,8 @@ The connection has no TLS. Run the sidecar on the Postgres host, or reach Postgr
 - Run it under a supervisor with restart. It exits on Postgres connection loss and on invariant violations, and re-takes the lock on restart.
 - captaind and watchmand also need a restart policy.
 
+Logs default to `info` when `RUST_LOG` is unset or invalid. Set `RUST_LOG=error` to suppress warnings and summaries, or `RUST_LOG=abandon_ship_server=debug` for individual waiting reasons. Each finished tick attempt logs one summary: observed tip, candidates examined, claims, successful payout submissions (including retries), quarantines, elapsed milliseconds and success. A failed attempt may have no observed tip.
+
 ## Journal
 
 `journal_path` is the payout record that survives a DB restore. Back it up separately from captaind's database. Never truncate it. New records contain all coin IDs of a batch and its raw transaction in one line. Complete legacy records remain readable; a partial final line is replaced on the next append.

@@ -40,6 +40,8 @@ cargo run --release -- config.toml --once    # one tick
 RUST_LOG=abandon_ship_server=debug ...       # logs why each coin waits
 ```
 
+Logs default to `info` when `RUST_LOG` is unset or invalid. Set `RUST_LOG=error` to suppress warnings and summaries, or `RUST_LOG=abandon_ship_server=debug` for individual waiting reasons. Each finished tick attempt logs one summary: observed tip, candidates examined, claims, successful payout submissions (including retries), quarantines, elapsed milliseconds and success. A failed attempt may have no observed tip.
+
 Tables: apply `migrations/0001_sidecar.sql` once. Setup and runbooks: `docs/deployment.md`. Scope, failures and guards: `docs/design.md`.
 
 ## Layout

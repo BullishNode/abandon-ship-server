@@ -10,7 +10,7 @@ mod journal;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ark::{ProtocolEncoding, Vtxo};
 use bitcoin::secp256k1::Secp256k1;
@@ -39,10 +39,20 @@ enum Outcome {
 	Quarantine(String),
 }
 
+#[derive(Default)]
+struct TickStats {
+	tip: Option<u32>,
+	candidates: u64,
+	claims: u64,
+	payouts_broadcast: u64,
+	quarantines: u64,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
 	tracing_subscriber::fmt()
-		.with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+		.with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env()
+			.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
 		.init();
 
 	let mut args = std::env::args().skip(1);
@@ -69,11 +79,18 @@ async fn main() -> anyhow::Result<()> {
 	loop {
 		// A one-shot recovery must report failure to its caller. The daemon
 		// retries infrastructure errors; invariant violations stop either mode.
-		if let Err(e) = tick(&cfg, &sweep_spks, &mut db, &chain, &mut journal).await {
+		let started = Instant::now();
+		let mut stats = TickStats::default();
+		let result = tick(&cfg, &sweep_spks, &mut db, &chain, &mut journal, &mut stats).await;
+		let invariants = db::check_invariants(&db).await;
+		info!(tip = ?stats.tip, candidates = stats.candidates, claims = stats.claims,
+			payouts_broadcast = stats.payouts_broadcast, quarantines = stats.quarantines,
+			duration_ms = started.elapsed().as_millis(), success = result.is_ok() && invariants.is_ok(), "tick summary");
+		if let Err(e) = result {
 			if once || e.downcast_ref::<InvariantViolation>().is_some() { return Err(e) }
 			warn!("tick failed, retrying: {e:#}");
 		}
-		db::check_invariants(&db).await?;
+		invariants?;
 		if once { return Ok(()) }
 		tokio::time::sleep(Duration::from_secs(cfg.poll_interval_secs)).await;
 	}
@@ -83,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
 /// retried next tick; problems with a single coin quarantine that coin only.
 async fn tick(
 	cfg: &Config, sweep_spks: &[ScriptBuf], db: &mut tokio_postgres::Client, chain: &chain::Chain,
-	journal: &mut journal::Journal,
+	journal: &mut journal::Journal, stats: &mut TickStats,
 ) -> anyhow::Result<()> {
 	// Every tick: captaind may be upgraded under us.
 	let ver = db::captaind_schema_version(db).await?;
@@ -92,6 +109,7 @@ async fn tick(
 	}
 	chain.check_wallet().await?;
 	let tip = chain.tip().await?;
+	stats.tip = Some(tip);
 
 	// Journal first: any ledger row with a txid must be journaled (closes the
 	// crash window between storing a tx and journaling it), and any journaled
@@ -111,6 +129,7 @@ async fn tick(
 		let flipped = db::reassert_paid(db, &id).await?;
 		warn!(vtxo = %id, flipped, "journaled coin live again in captaind (restore?); re-marked spent");
 		db::quarantine(db, &id, "payout committed in local journal").await?;
+		stats.quarantines += 1;
 	}
 	// A backup taken after a claim but before signing still has its row.
 	// Reattach its journaled transaction instead of building another payment.
@@ -120,7 +139,7 @@ async fn tick(
 		}
 	}
 
-	settle_inflight(db, chain, journal).await?;
+	settle_inflight(db, chain, journal, stats).await?;
 
 	// Fee gate: bitcoind's real estimate only, no fallback rate, ever. No
 	// estimate: no new claims or transactions. Stored payouts were retried above.
@@ -134,7 +153,7 @@ async fn tick(
 
 	// Pay existing claims first. An estimate alone must not let a claim that
 	// fails the actual fee check occupy the batch forever.
-	if pay_claimed(cfg, db, chain, journal, fee_rate).await? { return Ok(()) }
+	if pay_claimed(cfg, db, chain, journal, fee_rate, stats).await? { return Ok(()) }
 	let share = checks::fee_share_bound(fee_rate);
 	let mut claims_left = p.max_batch;
 	let mut quarantined: u64 = 0;
@@ -143,10 +162,11 @@ async fn tick(
 	let min_amount = p.min_payout_sat.max(checks::min_affordable(share, p.max_fee_pct_per_payout));
 	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, min_amount).await? {
 		if claims_left <= 0 { break }
+		stats.candidates += 1;
 		if journal.contains(&c.vtxo_id) { continue } // handled above
 		let reason = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
 			Outcome::Quarantine(reason) => reason,
-			Outcome::Claimed => { claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed"); continue },
+			Outcome::Claimed => { stats.claims += 1; claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed"); continue },
 			Outcome::Lost => { info!(vtxo = %c.vtxo_id, "user redeemed first; skipped"); continue },
 			Outcome::Banned => { info!(vtxo = %c.vtxo_id, "banned; waiting before claim"); continue },
 			Outcome::Wait(why) => { tracing::debug!(vtxo = %c.vtxo_id, why, "waiting"); continue },
@@ -158,9 +178,10 @@ async fn tick(
 		}
 		warn!(vtxo = %c.vtxo_id, %reason, "quarantined");
 		db::quarantine(db, &c.vtxo_id, &reason).await?;
+		stats.quarantines += 1;
 	}
 
-	pay_claimed(cfg, db, chain, journal, fee_rate).await?;
+	pay_claimed(cfg, db, chain, journal, fee_rate, stats).await?;
 	Ok(())
 }
 
@@ -241,7 +262,7 @@ async fn process_coin(
 /// Pay one affordable batch, leaving deferred claims for a later tick.
 async fn pay_claimed(
 	cfg: &Config, db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal,
-	fee_rate: f64,
+	fee_rate: f64, stats: &mut TickStats,
 ) -> anyhow::Result<bool> {
 	let claimed = db::claimed_payouts(db).await?;
 	// A claimed row for a coin already in the journal means the ledger was
@@ -314,6 +335,7 @@ async fn pay_claimed(
 			db::mark_signed(db, &ids, &txid, &built.raw).await?; // persisted before broadcast
 			journal.record(&ids, &txid, &built.raw)?;            // and on local disk
 			chain.broadcast(built.raw).await?;
+			stats.payouts_broadcast += 1;
 			db::set_state_by_txid(db, &txid, "broadcast").await?;
 			info!(%txid, coins = ids.len(), fee = built.fee_sat, "payout broadcast");
 			return Ok(true);
@@ -324,7 +346,7 @@ async fn pay_claimed(
 
 /// Retry every journaled transaction until confirmed, including lost DB rows.
 async fn settle_inflight(
-	db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal,
+	db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal, stats: &mut TickStats,
 ) -> anyhow::Result<()> {
 	for (txid, raw) in journal.pending_transactions()? {
 		let confs = chain.confirmations(&txid).await.unwrap_or(0);
@@ -337,6 +359,7 @@ async fn settle_inflight(
 					warn!(%txid, "stored payout not accepted; retrying next tick: {e:#}");
 					continue;
 				}
+				stats.payouts_broadcast += 1;
 			}
 			db::set_state_by_txid(db, &txid, "broadcast").await?;
 		}
