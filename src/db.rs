@@ -8,6 +8,7 @@ const LEADER_LOCK: i64 = 0x41_42_41_4e_44_4f_4e; // "ABANDON"
 
 /// A row from captaind's `vtxo` table.
 pub struct Candidate {
+	pub expiry: i32,
 	pub vtxo_id: String,
 	pub vtxo: Vec<u8>,
 	pub unclaimed: bool,
@@ -52,9 +53,9 @@ pub async fn check_tables(db: &Client) -> anyhow::Result<()> {
 /// Expired, unpaid, unquarantined, spendable user coins past the grace period,
 /// of at least `min_amount` (filtered before the limit, so coins too small to
 /// pay never fill the window).
-pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64) -> anyhow::Result<Vec<Candidate>> {
+pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amount: u64, after: &(i32, String)) -> anyhow::Result<Vec<Candidate>> {
 	let rows = db.query("
-		SELECT v.vtxo_id, v.vtxo, v.spend_state = 'unclaimed' AS unclaimed
+		SELECT v.vtxo_id, v.vtxo, v.expiry, v.spend_state = 'unclaimed' AS unclaimed
 		FROM vtxo v
 		WHERE v.policy_type = 'pubkey'
 		  -- 'unclaimed' = a delegated refresh output whose owner never came back
@@ -64,11 +65,13 @@ pub async fn candidates(db: &Client, tip: u32, grace: u32, limit: i64, min_amoun
 		  AND v.amount >= $4::bigint
 		  AND NOT EXISTS (SELECT 1 FROM sidecar.payout p WHERE p.vtxo_id = v.vtxo_id)
 		  AND NOT EXISTS (SELECT 1 FROM sidecar.quarantine q WHERE q.vtxo_id = v.vtxo_id)
-		ORDER BY v.expiry
+		  AND (v.expiry, v.vtxo_id) > ($5, $6)
+		ORDER BY v.expiry, v.vtxo_id
 		LIMIT $3::bigint * 20
-	", &[&(grace as i64), &(tip as i64), &limit, &(min_amount as i64)]).await?;
+	", &[&(grace as i64), &(tip as i64), &limit, &(min_amount as i64), &after.0, &after.1]).await?;
 	rows.into_iter()
 		.map(|r| Ok(Candidate {
+			expiry: r.try_get("expiry")?,
 			vtxo_id: r.try_get("vtxo_id")?,
 			vtxo: r.try_get("vtxo")?,
 			unclaimed: r.try_get("unclaimed")?,

@@ -1,0 +1,29 @@
+Waiting candidates do not hide later eligible payouts — 2026-10-07
+
+Corrected standalone regression: before FAIL1117.3s / after PASS395.6s.
+The scenario creates more than one page of coins affordable at the actual
+estimate whose old sweep address is temporarily not configured. A later coin
+swept to the configured address must pay with max_batch=1. It then restores
+the old address and pays those waiting entitlements too.
+
+Combined main (unclaimed predecessor checks and startup reconciliation included):
+20261007T232926-20c86df4 FAIL541.987s: isolated legacy journal contained one
+old payment without raw bytes in either its journal or payout row. Startup
+correctly refused recovery. No pagination-pass claim from that attempt.
+Backed up the original journal, independently verified Core's confirmed tx
+58c621239d44bc6ab581cdc6175154ad1416daa1ceff04612c249728190b3c92 and recipient,
+and hydrated that one record. No coin ID/txid was added, removed or changed.
+Migration audit: /home/francis/bark-integration-2026-10-01/session2-continuation/2026-10-07/legacy-s2-journal/hydration.json
+Reconciliation preflight 20261007T234527-a7acbf76 PASS, exit0.
+
+Fresh combined scenario 20261007T234553-f7faebf7:
+PASS 364.665s, exit0.
+Later coin: gross499250 -> net498472 sat; waiting coins remain unclaimed until
+their original address is configured, then pay. Ledger invariants PASS.
+Frozen binary SHA256 9d4857115edeb071ab792753740525403ea8b35ee5595af91d670fb9a7ebc4b2.
+Cargo test --locked: 10 PASS / 0 FAIL. Build PASS.
+
+Earlier invalid affordability-fixture attempts (beforeFAIL663.6s/afterFAIL638.6s)
+are retained. Arkoor splits payments; the corrected fixture counts actual
+eligible outputs and checks affordability at the observed fee rate.
+Full final suite and signet qualification remain open.

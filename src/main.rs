@@ -133,25 +133,33 @@ async fn tick(
 	// Coins unaffordable at this rate are left out before the candidate
 	// limit: waiting for fees to fall, they must not crowd out payable coins.
 	let min_amount = p.min_payout_sat.max(checks::min_affordable(share, p.max_fee_pct_per_payout));
-	for c in db::candidates(db, tip, p.grace_blocks, p.max_batch, min_amount).await? {
-		if claims_left <= 0 { break }
-		stats.candidates += 1;
-		if journal.contains(&c.vtxo_id) { continue } // handled above
-		let reason = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
-			Outcome::Quarantine(reason) => reason,
-			Outcome::Claimed => { stats.claims += 1; claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed"); continue },
-			Outcome::Lost => { info!(vtxo = %c.vtxo_id, "user redeemed first; skipped"); continue },
-			Outcome::Banned => { info!(vtxo = %c.vtxo_id, "banned; waiting before claim"); continue },
-			Outcome::Wait(why) => { tracing::debug!(vtxo = %c.vtxo_id, why, "waiting"); continue },
-		};
-		quarantined += 1;
-		if quarantined > p.max_quarantine_per_tick {
-			return Err(InvariantViolation(format!(
-				"more than {} quarantines in one tick (last: {reason})", p.max_quarantine_per_tick)).into());
+	// Waiting rows do not consume the whole candidate window. Each query
+	// stays bounded, and the stable cursor moves past the rows just checked.
+	let mut cursor = (i32::MIN, String::new());
+	while claims_left > 0 {
+		let page = db::candidates(db, tip, p.grace_blocks, p.max_batch, min_amount, &cursor).await?;
+		let Some(last) = page.last() else { break; };
+		cursor = (last.expiry, last.vtxo_id.clone());
+		for c in page {
+			if claims_left <= 0 { break }
+			stats.candidates += 1;
+			if journal.contains(&c.vtxo_id) { continue } // handled above
+			let reason = match process_coin(cfg, sweep_spks, db, chain, tip, fee_rate, &c).await? {
+				Outcome::Quarantine(reason) => reason,
+				Outcome::Claimed => { stats.claims += 1; claims_left -= 1; info!(vtxo = %c.vtxo_id, "claimed"); continue },
+				Outcome::Lost => { info!(vtxo = %c.vtxo_id, "user redeemed first; skipped"); continue },
+				Outcome::Banned => { claims_left -= 1; info!(vtxo = %c.vtxo_id, "banned; waiting before claim"); continue },
+				Outcome::Wait(why) => { tracing::debug!(vtxo = %c.vtxo_id, why, "waiting"); continue },
+			};
+			quarantined += 1;
+			if quarantined > p.max_quarantine_per_tick {
+				return Err(InvariantViolation(format!(
+					"more than {} quarantines in one tick (last: {reason})", p.max_quarantine_per_tick)).into());
+			}
+			warn!(vtxo = %c.vtxo_id, %reason, "quarantined");
+			db::quarantine(db, &c.vtxo_id, &reason).await?;
+			stats.quarantines += 1;
 		}
-		warn!(vtxo = %c.vtxo_id, %reason, "quarantined");
-		db::quarantine(db, &c.vtxo_id, &reason).await?;
-		stats.quarantines += 1;
 	}
 
 	pay_claimed(cfg, db, chain, journal, fee_rate, stats).await?;

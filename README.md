@@ -13,7 +13,7 @@ Scope (`docs/design.md`): captaind, its DB, bitcoind and the sidecar are run and
    - restored live coins are set back to spent, and restored claims reattach the original transaction as a batch;
    - after ledger checks, write the marker used by captaind's startup gate. This pass needs no Core connection.
 3. **Settle.** Check the payout wallet and tip, retry stored transactions, and mark transactions with 6 confirmations as confirmed. Then require a real fee estimate before new claims or transactions.
-4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat` and affordable at the current rate (both filtered before the candidate limit), not paid, not quarantined. Existing claims are attempted first. Claims deferred by actual fees or funding leave room for new claims.
+4. **Select.** `pubkey` coins in state `spendable` or `unclaimed`, past `expiry + grace_blocks`, of at least `min_payout_sat` and affordable at the current rate (both filtered before the candidate limit), not paid, not quarantined. Page in stable expiry/ID order so waiting rows do not hide later eligible coins; new bans and claims consume the per-tick batch budget. Existing claims are attempted first. Claims deferred by actual fees or funding leave room for new claims.
 5. **Per coin.** Invalid coin data is quarantined. Infrastructure errors abort the tick; exceeding the quarantine limit stops the process.
    1. **Decode.** Amount, key and anchor come from the stored VTXO. An undecodable one is quarantined.
    2. **Fee share.** Skip if its fee share would exceed `max_fee_pct_per_payout` or leave less than 330 sat.
