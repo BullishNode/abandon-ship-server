@@ -2,6 +2,10 @@
 > See [endpoint-experiment.md](docs/endpoint-experiment.md) for its configuration and restore procedure.
 > The direct-database documentation below describes the baseline, not this adapter.
 
+Logging defaults to `info` when `RUST_LOG` is unset or invalid; `RUST_LOG=error`
+suppresses warnings and tick summaries. Each tick reports tip, candidates walked,
+new claims, successful payout submissions, quarantines, duration and success.
+
 # abandon-ship-server
 
 Pays the value of expired, unrefreshed Ark coins on-chain to BIP86 `tr(coin_pubkey)`, at most once, for a [captaind](https://gitlab.com/ark-bitcoin/bark) server (bark master `6768e0fb4`). Runs next to captaind without modifying it: it reads captaind's Postgres, changes a coin's `spend_state` and `banned_until_height` only through conditional updates, and keeps its own state in a `sidecar` schema and a local journal file.

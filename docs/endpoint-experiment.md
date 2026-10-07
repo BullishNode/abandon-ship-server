@@ -14,6 +14,12 @@ hints and atomically hands off eligible entitlements. Captaind's VTXO lock and
 unfinished-round check replace the sidecar ban and timed wait. Chain validation,
 fee selection, signing, the payout ledger and transaction journal stay here.
 
+Logging defaults to `info` for an unset or invalid `RUST_LOG`; explicit filters
+are respected. One summary per tick reports Core tip, candidates walked, new
+claim handoffs, successful payout submissions (including retries), quarantines,
+duration and success. An unavailable tip is `None`. Confirmation alone is not a
+new submission; receipt reimports are not new handoffs.
+
 A committed captaind receipt survives a lost response or local insert failure.
 Every tick scans receipts from the beginning and imports unknown obligations.
 Before building any new transaction, every local ID must have a remote receipt.

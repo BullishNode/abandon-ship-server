@@ -1,5 +1,9 @@
 # Deployment
 
+The default log level is `info` when `RUST_LOG` is unset or invalid. Set
+`RUST_LOG=debug` for detailed calls or `RUST_LOG=error` to suppress warnings and
+tick summaries. The RPC adapter deployment is described in `endpoint-experiment.md`.
+
 ## Postgres (captaind's database)
 
 Postgres listens on localhost or a private network; only captaind and the sidecar connect. The sidecar uses captaind's DB role, or any role owning captaind's schema. Create its schema and tables once:

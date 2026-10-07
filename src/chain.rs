@@ -36,6 +36,10 @@ impl Chain {
 		self.run(|c| { let _: serde_json::Value = c.call("getwalletinfo", &[])?; Ok(()) }).await
 	}
 
+	pub async fn tip(&self) -> anyhow::Result<u32> {
+		self.run(|c| Ok(c.get_block_count()?.try_into()?)).await
+	}
+
 	/// bitcoind's fee estimate in sat/vB for `conf_target`, or None if the
 	/// estimator has no answer (fresh node, broken estimator, offline).
 	pub async fn estimate_fee_rate(&self, conf_target: u16) -> anyhow::Result<Option<f64>> {
