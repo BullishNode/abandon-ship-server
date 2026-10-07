@@ -47,6 +47,10 @@ An omitted or stale export is not automatically detected before startup.
 
 Then start watchmand and the sidecar. Remote receipts recreate missing local
 rows; the independent journal reattaches their original signed transactions.
+Claimed rows are grouped by payout transaction and reattached in one local DB
+transaction. Already signed/confirmed members and missing rows remain valid;
+later imports join the same payment. Existing DB bytes repair an incomplete
+journal. If neither store has bytes, recovery stops with the coin IDs and txid.
 Confirmation skips a journaled batch only when every member has a confirmed
 local row; a failed import can therefore retry after other members confirm.
 Never discard the journal or start a second payout ledger to bypass an error.

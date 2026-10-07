@@ -71,8 +71,9 @@ pub async fn paid_ids(db: &Client) -> anyhow::Result<Vec<(String, String, bool)>
 		.into_iter().map(|r| Ok((r.try_get("vtxo_id")?, r.try_get("txid")?, r.try_get("confirmed")?))).collect()
 }
 
-pub async fn raw_tx(db: &Client, txid: &str) -> anyhow::Result<Vec<u8>> {
-	Ok(db.query_one("SELECT raw_tx FROM sidecar.payout WHERE txid = $1 LIMIT 1", &[&txid]).await?.try_get("raw_tx")?)
+pub async fn raw_tx(db: &Client, txid: &str) -> anyhow::Result<Option<Vec<u8>>> {
+	db.query_opt("SELECT raw_tx FROM sidecar.payout WHERE txid = $1 AND raw_tx IS NOT NULL LIMIT 1", &[&txid])
+		.await?.map(|row| Ok(row.try_get("raw_tx")?)).transpose()
 }
 
 pub async fn receipt_amounts(db: &Client, txid: &str) -> anyhow::Result<Vec<(String, u64)>> {

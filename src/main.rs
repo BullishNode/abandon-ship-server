@@ -150,15 +150,27 @@ async fn reconcile_local(
 		if confirmed { confirmed_ids.insert(id); }
 	}
 	for (txid, ids) in unjournaled {
-		journal.record(&ids, &txid, &db::raw_tx(db, &txid).await?)?;
+		let raw = db::raw_tx(db, &txid).await?.ok_or_else(|| InvariantViolation(format!(
+			"coins {ids:?}, payout {txid}: raw transaction missing from database and journal")))?;
+		journal.record(&ids, &txid, &raw)?;
 	}
 	journal.reconcile_confirmed(&confirmed_ids);
 	// A backup taken after a claim but before signing still has its row.
 	// Reattach its journaled transaction instead of building another payment.
+	let mut restored: BTreeMap<String, Vec<String>> = BTreeMap::new();
 	for claim in db::claimed_payouts(db).await? {
-		if let Some((txid, raw)) = journal.transaction(&claim.vtxo_id) {
-			db::mark_signed(db, &[claim.vtxo_id], &txid, &raw).await?;
+		if let Some(txid) = journal.txid(&claim.vtxo_id) {
+			restored.entry(txid.to_owned()).or_default().push(claim.vtxo_id);
 		}
+	}
+	for (txid, ids) in restored {
+		let raw = if let Some(raw) = journal.raw_tx(&ids[0]) { raw } else {
+			let raw = db::raw_tx(db, &txid).await?.ok_or_else(|| InvariantViolation(format!(
+				"coins {ids:?}, payout {txid}: raw transaction missing or unreadable in database and journal")))?;
+			journal.record(&ids, &txid, &raw)?;
+			raw
+		};
+		db::mark_signed(db, &ids, &txid, &raw).await?;
 	}
 	Ok(())
 }
@@ -459,7 +471,8 @@ async fn ensure_receipt(
 		std::fs::File::open(&directory)?.sync_all()?;
 		return Ok(());
 	}
-	let tx = bitcoin::consensus::deserialize(&db::raw_tx(db, txid).await?)?;
+	let raw = db::raw_tx(db, txid).await?.ok_or_else(|| anyhow::anyhow!("receipt raw transaction unavailable: {txid}"))?;
+	let tx = bitcoin::consensus::deserialize(&raw)?;
 	let expected = db::receipt_amounts(db, txid).await?.into_iter().map(|(address, amount)| {
 		Ok((Address::from_str(&address)?.require_network(cfg.network)?.script_pubkey(), amount))
 	}).collect::<anyhow::Result<Vec<_>>>()?;

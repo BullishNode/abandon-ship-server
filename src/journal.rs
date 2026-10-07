@@ -40,14 +40,11 @@ impl Journal {
 	pub fn ids(&self) -> Vec<String> { self.paid.keys().cloned().collect() }
 	pub fn txids(&self) -> impl Iterator<Item = String> + '_ { self.paid.values().cloned() }
 	pub fn contains(&self, id: &str) -> bool { self.paid.contains_key(id) }
+	pub fn txid(&self, id: &str) -> Option<&str> { self.paid.get(id).map(String::as_str) }
 	pub fn has_transaction(&self, txid: &str) -> bool { self.raw.contains_key(txid) }
 
 	pub fn raw_tx(&self, id: &str) -> Option<Vec<u8>> {
 		bitcoin::hex::FromHex::from_hex(self.raw.get(self.paid.get(id)?)?).ok()
-	}
-
-	pub fn transaction(&self, id: &str) -> Option<(String, Vec<u8>)> {
-		Some((self.paid.get(id)?.clone(), self.raw_tx(id)?))
 	}
 
 	pub fn mark_confirmed(&mut self, txid: &str) { self.confirmed.insert(txid.to_owned()); }
