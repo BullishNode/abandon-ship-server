@@ -1,0 +1,47 @@
+# bark-web wallet (our client fork + our bark fork's barkd) against this stack's
+# captaind. ./dc always layers this file; the services run only with profile web:
+#   ./dc <stack> --profile web up -d
+# Service names api/barkd match the client's nginx.conf.
+# The UI publishes on port 80; the firewall limits it to the admin IP and the
+# api requires the password in state/<stack>/webauth/ui_password.
+
+services:
+  barkd:
+    restart: unless-stopped
+    image: abandon-ship/bark:release-3ab429866
+    entrypoint: [/bin/sh, -c, "mkdir -p /data/.bark && exec barkd --port 4000 --host 0.0.0.0 --datadir /data/.bark --expose-mnemonic"]
+    volumes: ["webwallet:/data"]
+    depends_on:
+      captaind: {condition: service_healthy}
+    profiles: [web]
+
+  api:
+    restart: unless-stopped
+    build: {context: ../../abandon-ship-client, dockerfile: docker/bark-web-api.Dockerfile}
+    image: abandon-ship/bark-web-api:local
+    environment:
+      PORT: "4001"
+      WALLET_DIR: /wallet-data/.bark
+      BARKD_URL: http://barkd:4000
+      ARK_SERVER: http://captaind:3535
+      CHAIN_SOURCE: ${WEB_CHAIN_SOURCE}
+      BARK_NETWORK: ${WEB_NETWORK}
+      UI_AUTH: "true"
+      UI_PASSWORD_FILE: /auth/ui_password
+      UI_SESSION_SECRET_FILE: /auth/ui_session_secret
+    volumes:
+      - webwallet:/wallet-data:ro
+      - ./state/${STACK}/webauth:/auth
+    depends_on: [barkd]
+    profiles: [web]
+
+  web:
+    restart: unless-stopped
+    build: {context: ../../abandon-ship-client, dockerfile: docker/bark-web.Dockerfile}
+    image: abandon-ship/bark-web:local
+    ports: ["0.0.0.0:80:8080"]
+    depends_on: [api]
+    profiles: [web]
+
+volumes:
+  webwallet:
