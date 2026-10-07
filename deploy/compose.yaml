@@ -6,7 +6,7 @@ services:
   bitcoind:
     restart: unless-stopped
     image: bitcoin/bitcoin@sha256:a1d05be6939b5c85132a761d2b795f5b8a2612ce53782263da4939778e461792  # Core 31.0
-    command: [bitcoind, "${BITCOIND_NET}", -server, -printtoconsole, -rpcport=8332, -rpcbind=0.0.0.0, -rpcallowip=172.16.0.0/12, "-rpcuser=${RPC_USER}", "-rpcpassword=${RPC_PASS}", -txindex, -blockfilterindex, -coinstatsindex, "-dbcache=${BITCOIND_DBCACHE}"]
+    command: [bitcoind, "${BITCOIND_NET}", -server, -printtoconsole, -rpcport=8332, -rpcbind=0.0.0.0, -rpcallowip=172.16.0.0/12, "-rpcuser=${RPC_USER}", "-rpcpassword=${RPC_PASS}", -txindex, "-blockfilterindex=${BITCOIND_FILTER_INDEXES}", "-coinstatsindex=${BITCOIND_FILTER_INDEXES}", "-dbcache=${BITCOIND_DBCACHE}"]
     volumes: ["${BITCOIN_VOLUME}:/home/bitcoin/.bitcoin"]
     healthcheck:
       test: [CMD-SHELL, "bitcoin-cli ${BITCOIND_NET} -rpcport=8332 -rpcuser=${RPC_USER} -rpcpassword=${RPC_PASS} getblockchaininfo >/dev/null"]
