@@ -66,6 +66,10 @@ rollback to a stale captaind backup is not supported by this procedure.
 
 ## Fees and receipts
 
+Funding selects safe, spendable, unlocked wallet outputs largest first and asks
+Core to use only those inputs. Stored payout inputs are reserved before new
+construction. Funding/fee deferrals can shrink a batch or move to a later claim.
+
 Core subtracts payout fees from recipient outputs. The sidecar also requires
 summed recipient deductions to equal the entire reported mining fee and checks
 each output's percentage/dust limit. Multiple selected coins sharing a key share

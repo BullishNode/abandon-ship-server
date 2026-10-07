@@ -82,6 +82,26 @@ impl Chain {
 		self.run(move |c| {
 			// Untyped calls only: typed decoding broke on Core 31.
 			let n = outputs.len();
+			let required: u64 = outputs.iter().map(|(_, amount)| amount).sum();
+			let locked: Vec<serde_json::Value> = c.call("listlockunspent", &[])?;
+			let unspent: Vec<serde_json::Value> = c.call("listunspent", &[0.into()])?;
+			let mut coins = Vec::new();
+			for coin in unspent {
+				let input = serde_json::json!({"txid": coin["txid"], "vout": coin["vout"]});
+				if coin["spendable"] != true || coin["safe"] != true || locked.contains(&input) { continue; }
+				let value = Amount::from_btc(coin["amount"].as_f64().ok_or_else(|| anyhow::anyhow!("missing UTXO amount"))?)?.to_sat();
+				coins.push((value, input));
+			}
+			// Largest first keeps fragmented funding from displacing a usable input.
+			coins.sort_by_key(|(value, _)| std::cmp::Reverse(*value));
+			let mut inputs = Vec::new();
+			let mut available = 0;
+			for (value, input) in coins {
+				if available >= required { break; }
+				available += value;
+				inputs.push(input);
+			}
+			anyhow::ensure!(available >= required, "Insufficient funds");
 			let outs: serde_json::Map<String, serde_json::Value> = outputs.into_iter()
 				.map(|(a, s)| (a, serde_json::Value::from(Amount::from_sat(s).to_btc()))).collect();
 			let opts = serde_json::json!({
@@ -90,9 +110,10 @@ impl Chain {
 				// The rate already checked by the fee gate; never let the
 				// wallet pick its own (or fall back) behind our back.
 				"fee_rate": fee_rate_sat_vb,
+				"add_inputs": false,
 			});
 			let funded: serde_json::Value = c.call("walletcreatefundedpsbt",
-				&[serde_json::json!([]), serde_json::Value::Object(outs), 0.into(), opts])?;
+				&[inputs.into(), serde_json::Value::Object(outs), 0.into(), opts])?;
 			let psbt = funded["psbt"].as_str().ok_or_else(|| anyhow::anyhow!("no psbt"))?;
 			let fee_btc = funded["fee"].as_f64().ok_or_else(|| anyhow::anyhow!("no fee"))?;
 			let signed: serde_json::Value = c.call("walletprocesspsbt", &[psbt.into(), true.into()])?;

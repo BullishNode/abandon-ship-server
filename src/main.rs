@@ -319,7 +319,8 @@ async fn pay_claimed(
 				Ok(built) => built,
 				Err(e) => {
 					warn!("payout funding deferred: {e:#}");
-					if per_address.len() > 1 && e.to_string().contains("Insufficient funds") {
+					if per_address.len() > 1 && (e.to_string().contains("Insufficient funds")
+						|| e.to_string().contains("maximum weight")) {
 						let largest = per_address.iter().max_by_key(|(_, amount)| *amount).unwrap().0.clone();
 						per_address.remove(&largest);
 						continue;
