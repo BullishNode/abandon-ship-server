@@ -37,6 +37,8 @@ invoice_expiry = "48h"
 receive_htlc_forward_timeout = "3min"
 ln_receive_anti_dos_required = ${LN_ANTI_DOS}
 ln_max_fee_ppm = 900000
+# Required on mainnet (captaind refuses to start otherwise); bark clients send it.
+require_board_funding_tx = true
 
 [fees.board]
 min_fee_sat = 330 # Can be dust
