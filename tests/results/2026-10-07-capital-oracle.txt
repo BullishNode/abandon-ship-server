@@ -1,0 +1,23 @@
+Capital oracle checkpoint — bounded transaction graph
+
+13 common oracle sensitivity tests PASS (7 settlement/path,6 capital); synthetic counterexamples are not funded cycles.
+Actual Core capture PASS, observation 20261008T003055-175765e0.
+{
+  "opening_sat": 1981059360,
+  "external_inflow_sat": 0,
+  "closing_sat": 1981058107,
+  "closing_buckets_sat": {
+    "payout": 1981039840,
+    "user": 18267
+  },
+  "mining_fees_sat": {
+    "0922ed31ee96086bfea7de76de22de8c7b87e81601a123fb3db0dfda3b156d77": 730,
+    "284f20e69bd18531d0ae01effca7a1787900a5b5e1dfb6f1e6a906eb28367e03": 523
+  },
+  "scope": "declared transaction graph; not a complete wallet or liability audit"
+}
+
+The actual graph is the freshly recorded expiry payout and its browser spend. Opening value was the payout funding input, not total operator capital. Fees 730 and523sat counted once; closing Core UTXOs reconcile without external inflow.
+First actual capture FAIL, observation20261008T002953-79d0de45: the prior payout change had already funded a later payout omitted from the declared graph. The check correctly rejected the incomplete graph; its evidence remains as evidence-first-incomplete.json. A fresh stable two-transaction graph was captured instead. This is not a production defect and not a ten-cycle liquidity pass.
+Evidence: /home/francis/bark-integration-2026-10-01/session2-continuation/2026-10-07/capital-oracle/
+Remaining: full capital-cycle capture/adapters, liabilities, recoverability/progress and generated workloads, four-arm matched runs and signet.
