@@ -1,0 +1,20 @@
+Fork-tip Bark image and HTTP API journey — 2026-10-07 (local date)
+
+Image build PASS, source 3a8f9694ad41c08be4d2ca634d380b99dbb1d427.
+Tracked source archived before building; Dockerfile from that same revision.
+Image: abandon-ship/bark:release-3a8f9694a
+Digest: sha256:75ab091c616f21947d7330566e1bdc6c167960944e9ffda1dc7e64df26d0a602
+bark and barkd --version both identify 3a8f9694ad41c08be4d2ca634d380b99dbb1d427.
+Existing compiler warnings are retained in observation 20261007T235540-8670b3be.
+
+web-journey.sh: PASS 242.252s, exit0, 20261008T000809-f2db3620.
+Direct sidecar binary SHA256 f3065f23a63ab2cf172fba638a0e45480f5d330a4ad5b90da3b0a51a21204cb0.
+Actual board, refresh, offline expiry, sweep, payout, adopted server status,
+unconfirmed payout discovery, confirmation, restart, seed restore, payout
+spend, repeated-spend refusal and restored-wallet on-chain spend discovery.
+The former J1 log-only observation is now three assertions: payment is still
+in Core's mempool, one output is found, and its txid is the ledger payment.
+
+This is an HTTP API journey through barkd, not a browser rendering test. It
+does not check receipt hosting/fee display in bark-web, strict same-height
+empty-cache invalidation, native bindings or signet. Those remain separate gates.

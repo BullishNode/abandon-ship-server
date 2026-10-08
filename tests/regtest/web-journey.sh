@@ -1,17 +1,18 @@
 #!/bin/bash
-# The user journey of bark-web on the variant-b barkd (image
-# abandon-ship/bark:variant-b, as the compose service `barkd`): receive, go
+# The bark-web HTTP API journey on variant-b barkd (not a browser test).
+# BARK_IMAGE pins the tested image; default abandon-ship/bark:variant-b. Receive, go
 # offline, expire, get paid, come back, adopt the spent state, find the payout,
 # restore the seed on a second barkd, sweep, and check that the money shows once.
 # Each barkd here is a fresh container with a fresh wallet, removed at the end.
 . "$(dirname "$0")/lib.sh"
 NET=${PROJECT}_default
+BARK_IMAGE=${BARK_IMAGE:-abandon-ship/bark:variant-b}
 C=$PROJECT-web-journey C2=$PROJECT-web-journey-restore
 api() { curl -s -X "$1" "$2$3" -H 'content-type: application/json' -d "${4:-{\}}"; } # api <method> <host> <path> [json]
 jlen() { python3 -c "import json,sys; print(len(json.load(sys.stdin)))"; }
 barkd() { # barkd <container>: print Docker's assigned localhost address
 	docker rm -f "$1" > /dev/null 2>&1
-	docker run -d --name "$1" --network $NET -p 127.0.0.1::3000 abandon-ship/bark:variant-b \
+	docker run -d --name "$1" --network $NET -p 127.0.0.1::3000 "$BARK_IMAGE" \
 		barkd --host 0.0.0.0 --port 3000 --dangerously-allow-remote-no-auth > /dev/null || return 1
 	local i address
 	address=$(docker port "$1" 3000/tcp) || return 1
@@ -30,6 +31,7 @@ expiry_movements() { api GET "$1" /api/v1/wallet/movements | python3 -c "import 
 print(sum(m['subsystem']['kind'] == 'expiry-payout' for m in json.load(sys.stdin)))"; }
 
 mkcfg
+docker image inspect "$BARK_IMAGE" --format '{{.Id}}' > "$LOG/bark-image.txt" || exit 2
 BIRTH=$(tip)
 B=$(barkd "$C") || { check "barkd started" false; finish; }
 create $B; up $B || { check "barkd wallet ready" false; finish; }
@@ -59,7 +61,10 @@ docker start $C > /dev/null; B=$(docker port "$C" 3000/tcp)
 up $B || { check "barkd wallet ready after coming online" false; finish; }
 check "J1: server spent state adopted" eq "$(api POST $B /api/v1/wallet/vtxos/adopt-server-status "{\"vtxo_ids\":[\"$ID\"]}" | grep -o '"state":"[a-z]*"')" '"state":"spent"'
 check "J1: coin marked spent in the wallet" eq "$(api GET $B /api/v1/wallet/vtxos/$ID | python3 -c "import json,sys;print(json.load(sys.stdin)['state']['type'])")" spent
-say "J1: payouts seen while the payout is in the mempool: $(api POST $B /api/v1/wallet/vtxos/expiry-payouts | jlen) (bitcoind chain source: confirmed only)"
+api POST $B /api/v1/wallet/vtxos/expiry-payouts > "$LOG/payouts-mempool.json"
+check "J1: payout really is unconfirmed in Core" grep -q "$TXID" <<< "$(btc getrawmempool)"
+check "J1: unconfirmed payout is found" eq "$(jlen < "$LOG/payouts-mempool.json")" 1
+check "J1: found mempool output is the ledger payment" grep -q "$TXID" "$LOG/payouts-mempool.json"
 
 # Confirmed: Paid out.
 mine 1
