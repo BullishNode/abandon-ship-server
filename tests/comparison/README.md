@@ -23,6 +23,7 @@ The evidence JSON contains:
 - `coins`: IDs mapped to `parents` (prior coin IDs), `amount_sat` and `payout_script` (hex).
 - `payouts`: entries with `txid` and selected `coins`; `exits`: entries with `txid` and `coin`.
 - `max_fee_pct`, and `transactions` keyed by txid, using Core's verbose transaction format.
+- Optional `sweeps`: `{coin, txid}` proofs, with `sweep_scripts` and `sweep_min_confs`. When present, every paid coin must have a confirmed sweep spending an exact outpoint in its workload `path`, paying only allowed scripts apart from OP_RETURN/P2A. `predecessor_sweep_ids` lists original inputs that also require proof for an unclaimed replacement. Missing required proofs fail.
 
 `--bitcoin-cli /path/to/wrapper` fetches settlement transactions and their funding transactions through the selected arm's Core. `--save evidence.json` retains the captured facts before verification, including a counterexample. The wrapper obtains credentials from its local configuration. To verify saved evidence offline:
 
@@ -33,4 +34,6 @@ python3 -m unittest discover -s tests/comparison -p test_oracle.py -v
 
 `cargo run --locked --example vtxo_facts` reads one encoded VTXO as hex on stdin and returns its public ID, amount, BIP86 script and exit-path outpoints. Build the manifest from workload/client facts, independently of the sidecar's payment decision. Record which ancestry is known: undeclared ancestry cannot be checked. The helper decodes the pinned Ark format; it does not validate the path against the chain.
 
-The oracle is used in addition to live scenario assertions. It does not yet implement capital conservation, exact-branch verification, pending-claim recoverability, seeded flow generation or arm adapters. Those parts of the requested common framework remain open. Sensitivity tests use synthetic transaction facts; actual before/after evidence is distinguished in `../results/2026-10-07-comparison-oracle.txt`.
+The oracle is used in addition to live scenario assertions. It does not yet implement capital conservation, pending-claim recoverability, seeded flow generation or arm adapters. Those parts of the requested common framework remain open. Sensitivity tests use synthetic transaction facts; actual before/after evidence is distinguished in `../results/2026-10-07-comparison-oracle.txt`.
+
+Path facts must come from recorded client/VTXO data; this oracle does not itself verify Ark signatures or rederive transaction chains. The optional path proof is not enabled implicitly in older manifests. Actual sweep capture and a wrong-outpoint sensitivity check are recorded in `../results/2026-10-07-comparison-paths.txt`. Arm labels A/B/C/D do not imply an adapter or implementation is complete.

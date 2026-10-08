@@ -1,0 +1,21 @@
+Common exact-path checks — 2026-10-07
+
+Oracle sensitivity suite: 7 test methods PASS / 0 FAIL. The new method checks
+one valid proof plus four rejected changes: wrong output index, insufficient
+confirmations, foreign sweep destination and omitted original-input proof.
+These are synthetic sensitivity checks, not four live stack scenarios.
+
+Actual Core evidence from abandon-session2: five decoded coin paths, one
+payout, confirmed path sweeps and exact 1209-sat recipient-funded mining fee.
+Independent oracle PASS. Changing only the expected paths' output indexes
+causes the intended exact-outpoint rejection. The negative is a manifest
+mutation over actual transactions, not a live wrong-branch payment.
+
+Artifacts:
+/home/francis/bark-integration-2026-10-01/session2-continuation/2026-10-07/oracle-live/actual-path-sweeps.json
+/home/francis/bark-integration-2026-10-01/session2-continuation/2026-10-07/oracle-live/wrong-outpoint-sensitivity.json
+/home/francis/bark-integration-2026-10-01/session2-continuation/2026-10-07/oracle-live/path-check-result.json
+
+Manifest ancestry and paths must be obtained from workload/client facts.
+Pending recovery, capital conservation, generated mixed workloads and common
+arm adapters remain open. No signet or production-readiness claim.

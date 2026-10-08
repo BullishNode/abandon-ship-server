@@ -46,7 +46,7 @@ def main():
     note = sub.add_parser("note")
     sub.add_parser("index")
     for command in [run, note]:
-        command.add_argument("--arm", choices=["A", "B", "C", "common"], required=True)
+        command.add_argument("--arm", choices=["A", "B", "C", "D", "common"], required=True)
         command.add_argument("--case", required=True)
     run.add_argument("--cwd", type=Path, default=Path.cwd())
     run.add_argument("--expected-code", type=int, default=0)

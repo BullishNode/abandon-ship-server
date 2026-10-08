@@ -65,6 +65,29 @@ class OracleSensitivity(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "settled predecessor and replacement"):
             verify(data)
 
+    def test_exact_branch_and_predecessor_evidence(self):
+        data = evidence()
+        data.update(sweep_scripts=["55"], sweep_min_confs=6,
+                    sweeps=[dict(coin=c, txid="sweep") for c in ["a:0", "b:0", "c:0", "root:0"]])
+        for coin in data["coins"].values():
+            coin["path"] = ["tree:0"]
+        data["coins"]["a:0"]["predecessor_sweep_ids"] = ["root:0"]
+        data["transactions"]["sweep"] = dict(txid="sweep", confirmations=6,
+            vin=[dict(txid="tree", vout=0)], vout=[dict(scriptPubKey=dict(hex="55"))])
+        verify(data)
+        mutations = [
+            (lambda d: d["transactions"]["sweep"]["vin"][0].update(vout=1), "no outpoint"),
+            (lambda d: d["transactions"]["sweep"].update(confirmations=5), "not deep enough"),
+            (lambda d: d["transactions"]["sweep"]["vout"][0]["scriptPubKey"].update(hex="56"), "foreign destination"),
+            (lambda d: d["sweeps"].pop(), "missing required path sweep"),
+        ]
+        for mutate, message in mutations:
+            with self.subTest(message=message):
+                changed = deepcopy(data)
+                mutate(changed)
+                with self.assertRaisesRegex(AssertionError, message):
+                    verify(changed)
+
 
 if __name__ == "__main__":
     unittest.main()

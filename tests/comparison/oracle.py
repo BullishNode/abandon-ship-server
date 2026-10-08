@@ -52,6 +52,26 @@ def verify(evidence):
         overlap = lineage(coin) & settled.keys()
         assert not overlap, f"settled predecessor and replacement: {sorted(overlap)} -> {coin}"
 
+    # Path facts come from the workload's VTXO, not the implementation's
+    # eligibility verdict. Require this evidence explicitly for branch cases.
+    if "sweeps" in evidence:
+        required = {coin for item in evidence.get("payouts", []) for coin in item["coins"]}
+        required |= {parent for coin in tuple(required) for parent in coins[coin].get("predecessor_sweep_ids", [])}
+        sweeps = {item["coin"]: item["txid"] for item in evidence["sweeps"]}
+        assert len(sweeps) == len(evidence["sweeps"]), "duplicate sweep evidence"
+        assert required <= sweeps.keys(), "missing required path sweep"
+        allowed = set(evidence["sweep_scripts"])
+        for coin in required:
+            txid = sweeps[coin]
+            tx = transactions[txid]
+            assert tx["txid"] == txid, "sweep transaction identity mismatch"
+            assert tx.get("confirmations", 0) >= evidence["sweep_min_confs"], "sweep not deep enough"
+            inputs = {f'{i["txid"]}:{i["vout"]}' for i in tx["vin"]}
+            assert inputs.intersection(coins[coin]["path"]), f"sweep spends no outpoint on {coin}'s path"
+            outputs = [o["scriptPubKey"]["hex"] for o in tx["vout"]]
+            spendable = [script for script in outputs if not script.startswith("6a") and script != "51024e73"]
+            assert spendable and set(spendable) <= allowed, "sweep pays a foreign destination"
+
     fees = {}
     for item in evidence.get("payouts", []):
         txid = item["txid"]
@@ -76,6 +96,8 @@ def verify(evidence):
         assert deductions == miner_fee, f"recipient deductions {deductions} != mining fee {miner_fee} in {txid}"
         fees[txid] = miner_fee
     checks = ["settlement identity", "predecessor exclusion"]
+    if "sweeps" in evidence:
+        checks += ["exact path sweep and confirmation depth"]
     if fees:
         checks += ["recipient outputs", "actual fee equality and cap"]
     return {"settled_coins": len(settled), "payouts": len(fees), "mining_fees_sat": fees, "checks": checks}
@@ -91,7 +113,7 @@ def capture(evidence, bitcoin_cli):
             transactions[txid] = json.loads(result.stdout, parse_float=Decimal)
         return transactions[txid]
 
-    for item in evidence.get("exits", []) + evidence.get("payouts", []):
+    for item in evidence.get("exits", []) + evidence.get("payouts", []) + evidence.get("sweeps", []):
         tx = fetch(item["txid"])
         assert tx.get("confirmations", 0) >= 0, "conflicted transaction is not effective settlement"
         for input_ in tx["vin"]:
