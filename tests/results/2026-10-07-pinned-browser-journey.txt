@@ -1,0 +1,35 @@
+Pinned client browser journey — local regtest only
+
+Client: 36d1a07c3503690857fab499483f13432886ebc8 (clean isolated qualification worktree)
+Bark: 3a8f9694ad41c08be4d2ca634d380b99dbb1d427
+Image: sha256:75ab091c616f21947d7330566e1bdc6c167960944e9ffda1dc7e64df26d0a602
+Sidecar binary: f3065f23a63ab2cf172fba638a0e45480f5d330a4ad5b90da3b0a51a21204cb0
+Real Hono API, Nginx proxy, fresh barkd wallet, headless Chromium. No mocked wallet API.
+
+PASS npm run build (40.468s), observation 20261008T001946-28991b28.
+PASS fresh four-block expiry cycle, observation 20261008T002757-c520b6c3.
+PASS complete corrected browser run, observation 20261008T003020-44dfaf66.
+PASS Actual import form restores the scenario seed with birthday height through real Hono API and pinned barkd
+PASS Actual expiry payout discovered from seed; exact net/fee visible; mobile and desktop have no horizontal overflow
+PASS Receipt outage reports unknown fee and preserves payout amount/spend action
+PASS Privacy hides payout amount and deducted fee
+PASS Browser broadcast spends exact payout once; Core verifies separate transfer mining fee
+PASS Duplicate spend rejected; confirmed balance reconciles without double count; history separates fees and honors privacy
+
+Payout 0922ed31ee96086bfea7de76de22de8c7b87e81601a123fb3db0dfda3b156d77:1
+Original coin 7152fbb2deb9fe65f3a584c244e71bfa5c4253c20231c925186e717cde84c2c9:0
+Gross 19520 sat; net 18790 sat; original fee 730 sat.
+Browser spend 284f20e69bd18531d0ae01effca7a1787900a5b5e1dfb6f1e6a906eb28367e03, receiving 18267 sat, fee 523 sat.
+Total 49998635 -> 49998112 sat. Core verifies exact input and fee; duplicate spend refused. Browser exceptions: 0.
+
+Failed/setup attempts retained:
+- 20261008T002246-4d465b8f exit2: missing preparation script after a generator quoting error.
+- 20261008T002715-a7321723 exit1: browser had successfully spent; harness used fetch Response.ok as a function. Corrected and used a fresh actual payout, not a skipped assertion.
+- 20261008T002937-c0841b55 exit1: preparation assumed recipient vout0; fresh payout recipient is vout1. Corrected to recorded receipt output. No application failure in these attempts.
+
+Evidence directory: /home/francis/bark-integration-2026-10-01/session2-continuation/client-qualification
+Browser harness SHA256: 0dcfafc96259e88fc60656b053ecd019f8ab4f80e85848e21b46bb535fe650d7
+Screenshots: mobile-restored.png, desktop-restored.png, receipt-unavailable.png, privacy.png, movement-fees.png.
+Screenshots inspected: mobile layout fits390px; fee details are separated. UX observation: movement headline remains negative gross transferred value, which can look like an external payment although balance only loses the transfer fee. Consider clearer internal-transfer wording; no balance error observed.
+
+This is A on local regtest. It does not satisfy the designated signet URL, other approaches, all ordinary wallet flows, native bindings, or a complete accessibility audit. No owner's wallet used. Test mnemonic/private files excluded from this report.
