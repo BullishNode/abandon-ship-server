@@ -1,0 +1,36 @@
+Short expiry cycle — 2026-10-07 (local date)
+
+Regtest happy path with fresh test-wallet state:
+- captaind and pool lifetime 4 blocks;
+- exit delta 1, board confirmations 1;
+- wallet exit margin 1, refresh threshold 1;
+- sidecar grace 0, sweep confirmation floor 1.
+
+PASS 70.185s / exit0, observation 20261008T000410-eb2e6226.
+Actual board -> unexpired refresh -> confirmed round -> offline expiry ->
+sweep -> payout confirmed. Entitlement19520 sat -> net19054 sat.
+lifetime=4
+exit_margin=1
+start_height=15370
+round_observed_height=15372
+coin=6677ff49806cea10fd40e53e38c7364bfab344f1a4504fb1b7f942bc09c9fbc4:0
+expiry=15375
+payout_height=15379
+payout_txid=c3b0b88b31690bac483a0f631d00271be9369eb90600fae8c3c07e394a03e734
+
+Three-block predecessor run FAIL: after one round confirmation, the output
+had only two blocks remaining; Bark's 2*exit_margin + input_exit_delta rule
+requires three. The wallet correctly refused forfeiture. This is a real
+protocol-boundary observation, not a production defect.
+
+Two earlier harness setup failures retained: both matching captaind and pool
+vtxo_lifetime keys made the original uniqueness assertion fail; the first
+attempt also failed to override omitted default wallet config values. The
+fixture now sets both lifetime keys, writes wallet values explicitly, and
+stops on configuration failure. Existing server config is restored on exit;
+only this case's fresh wallet uses the shortened wallet settings.
+
+This measures a simple cycle on regtest. It is not a signet result or a claim
+that every deep exit, HTLC, large tree or block-arrival schedule fits four
+blocks. Use timings appropriate to those flows. Mainnet defaults/floors are
+unchanged. Signet minimum-cycle deployment awaits the remaining regtest gates.
