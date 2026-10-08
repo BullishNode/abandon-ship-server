@@ -77,5 +77,24 @@ say "receipt export exit=$?; historical rows missing after earlier restore tests
 check "export reconstructs identical selected receipt" cmp "$LOG/original.json" "$RECEIPTS/$TXID.json"
 check "export leaves journal bytes unchanged" eq "$(sha256sum "$JOURNAL")" "$BEFORE_JOURNAL"
 check "export leaves payment rows unchanged" eq "$(ledger_hash)" "$BEFORE_LEDGER"
+# Model a restore that loses payout rows while keeping Ark history and the
+# independent journal. This is an explicit row fixture, not a WAL restore.
+q "COPY (SELECT * FROM sidecar.payout WHERE txid='$TXID' ORDER BY vtxo_id) TO STDOUT WITH CSV" > "$LOG/payout-rows.csv" || exit 2
+test -s "$LOG/payout-rows.csv" || exit 2
+restore_rows() {
+	"$R/psql" -q -c 'COPY sidecar.payout FROM STDIN WITH CSV' < "$LOG/payout-rows.csv" > /dev/null || return 1
+}
+q "DELETE FROM sidecar.payout WHERE txid='$TXID'" > /dev/null || exit 2
+trap restore_rows EXIT
+rm -- "$RECEIPTS/$TXID.json"
+LOST_LEDGER=$(ledger_hash)
+"$BIN" "$CFG" --export-receipts > "$LOG/export-journal-only.log" 2>&1
+say "journal-only export exit=$?"
+check "journal-only receipt retains exact original fee" cmp "$LOG/original.json" "$RECEIPTS/$TXID.json"
+check "journal-only export leaves payment rows unchanged" eq "$(ledger_hash)" "$LOST_LEDGER"
+check "journal-only export leaves journal unchanged" eq "$(sha256sum "$JOURNAL")" "$BEFORE_JOURNAL"
+restore_rows || exit 2
+trap - EXIT
+check "fixture restored original rows" eq "$(ledger_hash)" "$BEFORE_LEDGER"
 confirm_payouts
 finish

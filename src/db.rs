@@ -280,8 +280,12 @@ pub async fn check_invariants(db: &Client) -> anyhow::Result<()> {
 	Ok(())
 }
 
-pub async fn receipt_amounts(db: &Client, txid: &str) -> anyhow::Result<Vec<(String, u64)>> {
-	db.query("SELECT address, sum(amount_sat)::bigint AS amount FROM sidecar.payout
-		WHERE txid = $1 GROUP BY address", &[&txid]).await?.into_iter()
-		.map(|r| Ok((r.try_get("address")?, r.try_get::<_, i64>("amount")? as u64))).collect()
+/// Receipt metadata can be reconstructed from the retained Ark coins even
+/// when a restored database has lost the sidecar's payment rows.
+pub async fn receipt_vtxos(db: &Client, txid: &str, journal_ids: &[String]) -> anyhow::Result<Vec<Vec<u8>>> {
+	db.query("WITH ids AS (
+		SELECT vtxo_id FROM sidecar.payout WHERE txid = $1
+		UNION SELECT unnest($2::text[])
+	) SELECT v.vtxo FROM ids LEFT JOIN vtxo v USING (vtxo_id)", &[&txid, &journal_ids]).await?
+		.into_iter().map(|r| Ok(r.try_get("vtxo")?)).collect()
 }

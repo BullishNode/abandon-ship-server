@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
 			.chain(journal.txids()).collect::<BTreeSet<_>>();
 		let mut failed = 0;
 		for txid in txids {
-			if let Err(e) = ensure_receipt(&cfg, &db, &chain, &txid).await {
+			if let Err(e) = ensure_receipt(&cfg, &db, &chain, &journal, &txid).await {
 				warn!(%txid, "receipt export failed: {e:#}");
 				failed += 1;
 			}
@@ -431,7 +431,7 @@ async fn settle_inflight(
 	cfg: &Config, db: &mut tokio_postgres::Client, chain: &chain::Chain, journal: &mut journal::Journal, stats: &mut TickStats,
 ) -> anyhow::Result<()> {
 	for (txid, raw) in journal.pending_transactions()? {
-		if let Err(e) = ensure_receipt(cfg, db, chain, &txid).await {
+		if let Err(e) = ensure_receipt(cfg, db, chain, journal, &txid).await {
 			warn!(%txid, "fee receipt unavailable; retrying payment independently: {e:#}");
 		}
 		let confs = chain.confirmations(&txid).await.unwrap_or(0);
@@ -459,7 +459,7 @@ async fn settle_inflight(
 }
 
 async fn ensure_receipt(
-	cfg: &Config, db: &tokio_postgres::Client, chain: &chain::Chain, txid: &str,
+	cfg: &Config, db: &tokio_postgres::Client, chain: &chain::Chain, journal: &journal::Journal, txid: &str,
 ) -> anyhow::Result<()> {
 	let directory = cfg.journal_path.with_extension("receipts");
 	if directory.join(format!("{txid}.json")).try_exists()? {
@@ -467,9 +467,19 @@ async fn ensure_receipt(
 		std::fs::File::open(&directory)?.sync_all()?;
 		return Ok(());
 	}
-	let tx = bitcoin::consensus::deserialize(&db::raw_tx(db, txid).await?)?;
-	let expected = db::receipt_amounts(db, txid).await?.into_iter().map(|(address, amount)| {
-		Ok((Address::from_str(&address)?.require_network(cfg.network)?.script_pubkey(), amount))
-	}).collect::<anyhow::Result<Vec<_>>>()?;
-	receipt::write(&directory, &tx, &expected, chain.transaction_fee(&tx).await?)
+	let ids = journal.coin_ids(txid);
+	let raw = match ids.first().and_then(|id| journal.raw_tx(id)) {
+		Some(raw) => raw,
+		None => db::raw_tx(db, txid).await?,
+	};
+	let tx: bitcoin::Transaction = bitcoin::consensus::deserialize(&raw)?;
+	anyhow::ensure!(tx.compute_txid().to_string() == txid, "receipt transaction ID mismatch");
+	let mut expected = BTreeMap::<ScriptBuf, u64>::new();
+	for raw in db::receipt_vtxos(db, txid, &ids).await? {
+		let coin: Vtxo = Vtxo::deserialize(&raw)?;
+		let script = Address::p2tr(&Secp256k1::verification_only(),
+			coin.user_pubkey().x_only_public_key().0, None, cfg.network).script_pubkey();
+		*expected.entry(script).or_default() += coin.amount().to_sat();
+	}
+	receipt::write(&directory, &tx, &expected.into_iter().collect::<Vec<_>>(), chain.transaction_fee(&tx).await?)
 }

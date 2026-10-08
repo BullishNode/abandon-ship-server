@@ -73,6 +73,9 @@ confirmed files, stop the sidecar and run
 reads the DB, journal and Core, holds the leader lock, and writes receipt files
 without reconciling or altering the payment ledger. It attempts all known
 transactions and exits nonzero if any receipt cannot be reconstructed.
-Keep payout metadata when restoring: missing or incomplete entitlement records
-can prevent exact fee reconstruction even while the payment remains recoverable.
+Export combines journal and payout-row IDs, reconstructs gross amounts and keys
+from retained Ark VTXOs, and verifies the deduction against the actual mining
+fee. Lost sidecar payout rows alone do not prevent reconstruction. Missing Ark
+history or inconsistent old fee data still prevents an exact receipt; keep
+complete backups.
 Missing fee metadata must appear as unknown in the client, never as zero.

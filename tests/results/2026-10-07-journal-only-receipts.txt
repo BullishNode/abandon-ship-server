@@ -1,0 +1,24 @@
+Fee receipt recovery when payout rows are missing — 2026-10-07
+
+Before: FAIL 271.092s, exit1, 20261008T000019-c8f7795b.
+Exactly the intended assertion failed: journal-only receipt retains exact
+original fee. Normal publication, shared-key values, unchanged state and
+fixture restoration assertions passed.
+After: PASS 197.780s, exit0, 20261008T000451-3859558a.
+11 unit PASS / 0 FAIL, build PASS. One initial compile failed due to a missing
+VTXO type annotation; corrected before building the tested binary.
+After binary SHA256 f3065f23a63ab2cf172fba638a0e45480f5d330a4ad5b90da3b0a51a21204cb0.
+
+Actual payout of five coins, including two sharing one key. Independent Core
+check: recipients deducted exactly1210sat, matching the mining fee. After
+saving and deleting that transaction's payout rows and its fee receipt, the
+read-only export reconstructs identical JSON from retained Ark VTXOs and the
+independent journal. Journal bytes and payment rows do not change. The fixture
+restores its exact original rows before normal confirmation/ledger checks.
+This is a real payment with an explicit SQL row-loss fixture, not a PITR drill.
+
+Remaining historical-data limitation: complete export still exits1 for old
+regtest transaction b0740b9a525acf63cb82e32f9a14e96c6d989975c212035648d9099cd994656d,
+whose reconstructed deductions do not equal its mining fee. It is refused
+rather than publishing an inaccurate fee. Current fixture receipts regenerate
+correctly. No claim of a clean complete historical export or signet test.
