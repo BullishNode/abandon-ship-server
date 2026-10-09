@@ -1,0 +1,38 @@
+# watchmand config for the expiry-fallback fork, rendered by fallback/render.sh.
+# sweep_address must be the rounds wallet: captaind refuses enabled payouts otherwise.
+sweep_address = "${SWEEP_ADDRESS}"
+data_dir = "/data/watchmand"
+network = "${NETWORK}"
+sync_manager_block_poll_interval = "5s"
+htlc_settlement_poll_interval = "60s"
+min_trusted_confs = ${WATCHMAN_TRUSTED_CONFS}
+otel_deployment_name = "abandon-${STACK}"
+admin_address = "127.0.0.1:3538"
+
+[watchman]
+reaction_interval = "10s"
+sweep_interval = "30s"
+progress_grace_period = 2
+claim_chunksize = 20
+incremental_relay_fee = "100 sat/kvb"
+min_cpfp_amount = "${MIN_CPFP_AMOUNT}"
+
+[fee_estimator]
+update_interval = "1m"
+history_duration = "60m"
+fallback_fee_rate_fast = "2sat/vb"
+fallback_fee_rate_regular = "1sat/vb"
+fallback_fee_rate_slow = "1sat/vb"
+
+[postgres]
+host = "fb-postgres"
+user = "postgres"
+password = "${PG_PASS}"
+port = 5432
+name = "bark-server-db"
+max_connections = 10
+
+[bitcoind]
+url = "http://bitcoind:8332"
+rpc_user = "${RPC_USER}"
+rpc_pass = "${RPC_PASS}"

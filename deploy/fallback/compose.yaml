@@ -1,0 +1,112 @@
+# Expiry-fallback fork beside the signet stack. Run through ./fallback/dcf.
+# Own postgres, captaind/watchmand datadirs and web wallet; no CLN. Only the
+# Ark daemons and barkd join the signet stack's network, to reach its bitcoind.
+# Service names carry an fb- prefix so nothing resolves to a signet-stack
+# container ("postgres", "captaind", "barkd" and "api" exist on that network).
+# The UI binds to the VM's loopback only: reach it through an SSH tunnel.
+
+x-fork: &fork
+  image: abandon-ship/captaind:fallback-${FORK_COMMIT}
+  restart: unless-stopped
+  networks: [default, signet]
+
+services:
+  fb-postgres:
+    restart: unless-stopped
+    image: postgres@sha256:da788743d2060767375896de4d646f7576f5911461444b372616f19ea61db2ec
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PG_PASS}
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres"]
+      interval: 5s
+      retries: 30
+
+  fb-captaind:
+    <<: *fork
+    environment:
+      CAPTAIND_LOG: info
+    entrypoint: [captaind, --config, /config/captaind.toml]
+    command: [start]
+    volumes:
+      - captaind:/data/captaind
+      - ./state/signet-fallback/captaind.toml:/config/captaind.toml:ro
+      - ./state/signet-fallback/watchmand.toml:/config/watchmand.toml:ro
+      - ./state/signet-fallback/receipts:/receipts
+    depends_on:
+      fb-postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "captaind --config /config/captaind.toml rpc wallet >/dev/null"]
+      interval: 10s
+      retries: 60
+
+  fb-watchmand:
+    <<: *fork
+    environment:
+      WATCHMAND_LOG: info
+    entrypoint: [/bin/sh, -c, "umask 077; [ -f /data/watchmand/mnemonic ] || cp /data/captaind/mnemonic /data/watchmand/mnemonic; exec watchmand --config /config/watchmand.toml start"]
+    volumes:
+      - captaind:/data/captaind:ro
+      - watchmand:/data/watchmand
+      - ./state/signet-fallback/watchmand.toml:/config/watchmand.toml:ro
+    depends_on:
+      fb-captaind: {condition: service_healthy}
+
+  # The Ark origin wallets use: gRPC to captaind plus the payout receipts.
+  fb-ark:
+    restart: unless-stopped
+    image: nginx@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
+    volumes:
+      - ./fallback/ark.conf:/etc/nginx/nginx.conf:ro
+      - ./state/signet-fallback/receipts:/receipts:ro
+    depends_on:
+      fb-captaind: {condition: service_healthy}
+
+  fb-barkd:
+    restart: unless-stopped
+    image: abandon-ship/bark:fallback-${FORK_COMMIT}
+    entrypoint: [/bin/sh, -c, "mkdir -p /data/.bark && exec barkd --port 4000 --host 0.0.0.0 --datadir /data/.bark --expose-mnemonic"]
+    volumes:
+      - webwallet:/data
+      - ./state/signet-fallback/core.cookie:/test/core.cookie:ro
+    networks:
+      default: {aliases: [barkd]}
+      signet: {}
+    depends_on: [fb-ark]
+
+  fb-api:
+    restart: unless-stopped
+    image: abandon-ship/bark-web-api:36d1a07
+    environment:
+      PORT: "4001"
+      WALLET_DIR: /wallet-data/.bark
+      BARKD_URL: http://fb-barkd:4000
+      ARK_SERVER: http://fb-ark:3535
+      BARK_NETWORK: signet
+      BITCOIND_RPC_URL: http://bitcoind:8332
+      BITCOIND_RPC_COOKIE_FILE: /test/core.cookie
+      CHAIN_SOURCE: ""
+      # Loopback-only UI behind SSH; no password to keep.
+      UI_AUTH: "false"
+    volumes: ["webwallet:/wallet-data:ro"]
+    networks:
+      default: {aliases: [api]}
+    depends_on: [fb-barkd]
+
+  fb-web:
+    restart: unless-stopped
+    image: abandon-ship/bark-web:release-3d794c6
+    ports: ["127.0.0.1:18080:8080"]
+    depends_on: [fb-api]
+
+networks:
+  signet:
+    name: abandon-signet_default
+    external: true
+
+volumes:
+  postgres:
+  captaind:
+  watchmand:
+  webwallet:

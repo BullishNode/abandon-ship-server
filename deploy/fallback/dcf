@@ -1,0 +1,9 @@
+#!/bin/sh
+# docker compose for the expiry-fallback stack: ./fallback/dcf <compose args...>
+# Project abandon-signet-fallback; the signet stack's ./dc signet is untouched.
+set -eu
+cd "$(dirname "$0")/.."
+[ -f state/signet-fallback/secrets.env ] || { echo "run ./fallback/render.sh first" >&2; exit 1; }
+exec docker compose -p abandon-signet-fallback --project-directory . \
+	--env-file fallback/signet-fallback.env --env-file state/signet-fallback/secrets.env \
+	-f fallback/compose.yaml "$@"
