@@ -66,7 +66,7 @@ services:
   fb-barkd:
     restart: unless-stopped
     image: abandon-ship/bark:fallback-${FORK_COMMIT}
-    entrypoint: [/bin/sh, -c, "mkdir -p /data/.bark && exec barkd --port 4000 --host 0.0.0.0 --datadir /data/.bark --expose-mnemonic"]
+    entrypoint: [/bin/sh, -c, "mkdir -p -m 700 /data/.bark && chmod 700 /data/.bark && exec barkd --port 4000 --host 0.0.0.0 --datadir /data/.bark --expose-mnemonic"]
     volumes:
       - webwallet:/data
       - ./state/signet-fallback/core.cookie:/test/core.cookie:ro
