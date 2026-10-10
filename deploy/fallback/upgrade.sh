@@ -17,7 +17,7 @@ case "${1:?usage: upgrade.sh server|wallets}" in
 server)
 	. ./fallback/signet-fallback.env
 	for image in captaind bark; do sudo docker image inspect "abandon-ship/$image:fallback-$FORK_COMMIT" >/dev/null; done
-	dcf stop fb-web fb-api fb-barkd fb-watchmand fb-captaind
+	dcf stop fb-web fb-web2 fb-api fb-api2 fb-barkd fb-barkd2 fb-watchmand fb-captaind
 	# Idempotent: CREATE/ADD ... IF NOT EXISTS only.
 	psql_file fallback/sql/expiry-settlement.sql
 	psql_file fallback/sql/expiry-fallback.sql
@@ -27,7 +27,7 @@ server)
 	dcf up -d --no-deps fb-watchmand ;;
 wallets)
 	dcf up -d --no-deps --force-recreate fb-ark
-	dcf up -d --no-deps fb-barkd fb-api fb-web ;;
+	dcf up -d --no-deps fb-barkd fb-api fb-web fb-barkd2 fb-api2 fb-web2 ;;
 *) echo "unknown step $1" >&2; exit 1 ;;
 esac
 dcf ps
