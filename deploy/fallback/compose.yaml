@@ -33,7 +33,6 @@ services:
       - captaind:/data/captaind
       - ./state/signet-fallback/captaind.toml:/config/captaind.toml:ro
       - ./state/signet-fallback/watchmand.toml:/config/watchmand.toml:ro
-      - ./state/signet-fallback/receipts:/receipts
     depends_on:
       fb-postgres: {condition: service_healthy}
     healthcheck:
@@ -53,13 +52,12 @@ services:
     depends_on:
       fb-captaind: {condition: service_healthy}
 
-  # The Ark origin wallets use: gRPC to captaind plus the payout receipts.
+  # The Ark origin wallets use: gRPC to captaind.
   fb-ark:
     restart: unless-stopped
     image: nginx@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
     volumes:
       - ./fallback/ark.conf:/etc/nginx/nginx.conf:ro
-      - ./state/signet-fallback/receipts:/receipts:ro
     depends_on:
       fb-captaind: {condition: service_healthy}
 
@@ -77,7 +75,7 @@ services:
 
   fb-api:
     restart: unless-stopped
-    image: abandon-ship/bark-web-api:36d1a07
+    image: abandon-ship/bark-web-api:${WEB_API_TAG}
     environment:
       PORT: "4001"
       WALLET_DIR: /wallet-data/.bark
@@ -96,17 +94,72 @@ services:
 
   fb-web:
     restart: unless-stopped
-    image: abandon-ship/bark-web:release-3d794c6
+    image: abandon-ship/bark-web:${WEB_TAG}
     ports: ["127.0.0.1:18080:8080"]
     depends_on: [fb-api]
+
+  # A second web wallet for fresh-wallet journeys, UI on 127.0.0.1:18081. Its
+  # own network gives fb-web2 the barkd/api names bark-web's nginx expects.
+  fb-barkd2:
+    restart: unless-stopped
+    image: abandon-ship/bark:fallback-${FORK_COMMIT}
+    entrypoint: [/bin/sh, -c, "mkdir -p -m 700 /data/.bark && chmod 700 /data/.bark && exec barkd --port 4000 --host 0.0.0.0 --datadir /data/.bark --expose-mnemonic"]
+    volumes:
+      - webwallet2:/data
+      - ./state/signet-fallback/core.cookie:/test/core.cookie:ro
+    networks:
+      default: {}
+      signet: {}
+      wallet2: {aliases: [barkd]}
+    depends_on: [fb-ark]
+
+  fb-api2:
+    restart: unless-stopped
+    image: abandon-ship/bark-web-api:${WEB_API_TAG}
+    environment:
+      PORT: "4001"
+      WALLET_DIR: /wallet-data/.bark
+      BARKD_URL: http://fb-barkd2:4000
+      ARK_SERVER: http://fb-ark:3535
+      BARK_NETWORK: signet
+      BITCOIND_RPC_URL: http://bitcoind:8332
+      BITCOIND_RPC_COOKIE_FILE: /test/core.cookie
+      CHAIN_SOURCE: ""
+      UI_AUTH: "false"
+    volumes: ["webwallet2:/wallet-data:ro"]
+    networks:
+      default: {}
+      wallet2: {aliases: [api]}
+    depends_on: [fb-barkd2]
+
+  fb-web2:
+    restart: unless-stopped
+    image: abandon-ship/bark-web:${WEB_TAG}
+    ports: ["127.0.0.1:18081:8080"]
+    networks: [wallet2]
+    depends_on: [fb-api2]
+
+  # bark CLI wallets for multi-wallet journeys, one datadir per wallet:
+  #   ./fallback/dcf run --rm -T fb-cli --datadir /data/<name> <bark args>
+  fb-cli:
+    profiles: [cli]
+    image: abandon-ship/bark:fallback-${FORK_COMMIT}
+    entrypoint: [bark]
+    volumes:
+      - cliwallets:/data
+      - ./state/signet-fallback/core.cookie:/test/core.cookie:ro
+    networks: [default, signet]
 
 networks:
   signet:
     name: abandon-signet_default
     external: true
+  wallet2:
 
 volumes:
   postgres:
   captaind:
   watchmand:
   webwallet:
+  webwallet2:
+  cliwallets:

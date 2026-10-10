@@ -2,6 +2,7 @@
 # Operator helpers for the expiry-fallback stack, on the VM, from deploy/.
 #   ./fallback/ops.sh barkd GET wallet/fallback-destination   barkd REST, bearer token stays here
 #   ./fallback/ops.sh barkd POST onchain/addresses/next '{}'
+#   BARKD=fb-barkd2 ./fallback/ops.sh barkd GET wallet/balance    the second web wallet
 #   ./fallback/ops.sh sql "select ..."                          new stack's database
 #   ./fallback/ops.sh cli <bitcoin-cli args>                    shared signet bitcoind
 #   ./fallback/ops.sh capt <captaind args>                      e.g. rpc wallet
@@ -15,8 +16,9 @@ cmd=${1:?usage: see header}; shift
 case "$cmd" in
 barkd)
 	method=$1 path=$2 body=${3:-}
-	token=$(sudo docker exec $p-fb-barkd-1 cat /data/.bark/auth_token)
-	ip=$(sudo docker inspect -f "{{(index .NetworkSettings.Networks \"${p}_default\").IPAddress}}" $p-fb-barkd-1)
+	c=$p-${BARKD:-fb-barkd}-1
+	token=$(sudo docker exec $c cat /data/.bark/auth_token)
+	ip=$(sudo docker inspect -f "{{(index .NetworkSettings.Networks \"${p}_default\").IPAddress}}" $c)
 	args=(-sS --fail-with-body -X "$method" -H "Authorization: Bearer $token" -H 'content-type: application/json')
 	[ -n "$body" ] && args+=(-d "$body")
 	curl "${args[@]}" "http://$ip:4000/api/v1/$path"; echo ;;

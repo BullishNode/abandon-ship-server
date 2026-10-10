@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.source=https://github.com/BullishNode/abandon-shi
 FROM base AS captaind
 COPY captaind watchmand /usr/local/bin/
 # Fresh volumes copy these directories' ownership from the image.
-RUN mkdir -p /data/captaind /data/watchmand /receipts && chown -R 1000:1000 /data /receipts
+RUN mkdir -p /data/captaind /data/watchmand && chown -R 1000:1000 /data
 USER 1000:1000
 ENTRYPOINT ["captaind"]
 

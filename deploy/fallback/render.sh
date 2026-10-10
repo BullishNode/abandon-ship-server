@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 SIGNET_DEPLOY=${SIGNET_DEPLOY:-$HOME/abandon-ship-server/deploy}
 umask 077
 dir=state/signet-fallback
-mkdir -p "$dir/receipts"
+mkdir -p "$dir"
 if [ ! -f "$dir/secrets.env" ]; then
 	printf 'PG_PASS=%s\n' "$(openssl rand -hex 24)" > "$dir/secrets.env"
 fi
@@ -32,7 +32,4 @@ else
 fi
 # barkd reads this as its bitcoind cookie (user:pass).
 printf '%s:%s' "$RPC_USER" "$RPC_PASS" > "$dir/core.cookie"
-# The fork's images run as uid 1000 (the VM's ubuntu user); nginx (fb-ark)
-# serves the receipts read-only.
-chmod 755 "$dir/receipts"
 ls -l "$dir"
