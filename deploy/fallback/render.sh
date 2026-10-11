@@ -17,6 +17,7 @@ set -a
 . "$SIGNET_DEPLOY/state/signet/secrets.env"
 . "./$dir/secrets.env"
 [ -f "$dir/sweep.env" ] && . "./$dir/sweep.env"
+[ -f "$dir/simulation.env" ] && . "./$dir/simulation.env"
 set +a
 EXPIRY_ENABLED=false
 if [ "${1:-}" = enabled ]; then
@@ -24,7 +25,20 @@ if [ "${1:-}" = enabled ]; then
 	EXPIRY_ENABLED=true
 fi
 export EXPIRY_ENABLED
-envsubst < fallback/templates/captaind.toml.tmpl > "$dir/captaind.toml"
+config_tmp=$(mktemp "$dir/.captaind.toml.XXXXXX")
+trap 'rm -f "$config_tmp"' EXIT HUP INT TERM
+envsubst < fallback/templates/captaind.toml.tmpl > "$config_tmp"
+if [ -n "${SIMULATION_LIGHTNING_HOST:-}" ]; then
+	python3 -c 'import ipaddress,os; ipaddress.IPv4Address(os.environ["SIMULATION_LIGHTNING_HOST"])'
+	for node in core hold; do
+		for name in ca.pem client.pem client-key.pem; do
+			[ -s "$dir/simulation-cln/$node/$name" ] || { echo "missing simulator mTLS file" >&2; exit 1; }
+		done
+	done
+	envsubst < fallback/templates/simulation-cln.toml.tmpl >> "$config_tmp"
+fi
+python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$config_tmp"
+mv "$config_tmp" "$dir/captaind.toml"
 if [ -n "${SWEEP_ADDRESS:-}" ]; then
 	envsubst < fallback/templates/watchmand.toml.tmpl > "$dir/watchmand.toml"
 else

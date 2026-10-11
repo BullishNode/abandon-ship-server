@@ -1,5 +1,6 @@
 # Expiry-fallback fork beside the signet stack. Run through ./fallback/dcf.
-# Own postgres, captaind/watchmand datadirs and web wallet; no CLN. Only the
+# Own postgres, captaind/watchmand datadirs and web wallet. Optional simulator CLN
+# runs on its separate VM; this compose project does not own that node. Only the
 # Ark daemons and barkd join the signet stack's network, to reach its bitcoind.
 # Service names carry an fb- prefix so nothing resolves to a signet-stack
 # container ("postgres", "captaind", "barkd" and "api" exist on that network).
@@ -33,6 +34,7 @@ services:
       - captaind:/data/captaind
       - ./state/signet-fallback/captaind.toml:/config/captaind.toml:ro
       - ./state/signet-fallback/watchmand.toml:/config/watchmand.toml:ro
+      - ./state/signet-fallback/simulation-cln:/config/simulation-cln:ro
     depends_on:
       fb-postgres: {condition: service_healthy}
     healthcheck:

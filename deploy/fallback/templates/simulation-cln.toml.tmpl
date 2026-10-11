@@ -1,0 +1,13 @@
+# Optional isolated simulator node. TLS keys stay in ignored deployment state.
+[[cln_array]]
+uri = "https://${SIMULATION_LIGHTNING_HOST}:9470"
+priority = 0
+server_cert_path = "/config/simulation-cln/core/ca.pem"
+client_cert_path = "/config/simulation-cln/core/client.pem"
+client_key_path = "/config/simulation-cln/core/client-key.pem"
+
+[cln_array.hold_invoice]
+uri = "https://${SIMULATION_LIGHTNING_HOST}:9471"
+server_cert_path = "/config/simulation-cln/hold/ca.pem"
+client_cert_path = "/config/simulation-cln/hold/client.pem"
+client_key_path = "/config/simulation-cln/hold/client-key.pem"
