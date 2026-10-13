@@ -1,0 +1,11 @@
+[Unit]
+Description=Signet operator pool and rounds liquidity alerts
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/usr/bin/python3 /opt/abandon-simulation/operator-health-monitor.py --policy /opt/abandon-simulation/operator-health-policy.json
+TimeoutStartSec=25
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=abandon-operator-health

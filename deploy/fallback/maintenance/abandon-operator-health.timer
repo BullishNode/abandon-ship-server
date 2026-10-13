@@ -1,0 +1,11 @@
+[Unit]
+Description=Check signet operator liquidity every minute
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+AccuracySec=1
+Unit=abandon-operator-health.service
+
+[Install]
+WantedBy=timers.target

@@ -97,11 +97,22 @@ class OperatorPolicyTest(unittest.TestCase):
             cap = tomllib.loads((state / 'captaind.toml').read_text())
             watch = tomllib.loads((state / 'watchmand.toml').read_text())
             for config in [cap, watch]:
-                self.assertEqual('2sat/vb', config['fee_estimator']['max_fee_rate'])
+                self.assertEqual('20sat/vb', config['fee_estimator']['max_fee_rate'])
             self.assertEqual(48, cap['vtxo_lifetime'])
             self.assertEqual(48, cap['vtxopool']['vtxo_lifetime'])
             self.assertEqual('30s', cap['round_interval'])
             self.assertEqual(1000, cap['expiry_payout']['min_payout_sat'])
+            policy = {**self.policy, 'network': 'signet', 'fee_budget_sat': 40000,
+                      'planned_funding_vbytes': 2000, 'operator_fee_reserve_sat': 50000,
+                      'rounds_working_capital_sat': 160000, 'opening_confirmed_rounds_sat': 300000,
+                      'wallet_refresh_threshold_blocks': 12}
+            result = preflight.check(cap, watch, policy)
+            self.assertEqual(20, result['estimator_max_sat_vb'])
+            self.assertEqual(300000, result['required_confirmed_capital_sat'])
+            self.assertEqual(140000, result['low_rounds_balance_alert_sat'])
+            policy['planned_funding_vbytes'] += 1
+            with self.assertRaises(ValueError):
+                preflight.check(cap, watch, policy)
 
     def test_missing_reserve_is_not_operating_capital(self):
         self.policy['opening_confirmed_rounds_sat'] -= 1
