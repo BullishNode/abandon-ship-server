@@ -22,6 +22,12 @@ archives remain on the target with owner-only permissions.
 - `prepare-payout-witness.py`: converts an independently audited inventory into
   native witness files in a new private directory. Formatting alone is neither
   complete-history proof nor permission to install or start a daemon.
+- `fee-estimate-provider.py`: temporary signet-only Core estimate response
+  control for the separately declared spike window. Read
+  `FEE_ESTIMATE_PROVIDER.md` for payout/sweep separation, authenticating the
+  private endpoint, fresh coordination, and its explicit fee-budget limits.
+  `check` is read-only and opens no listener; installation alone changes no
+  daemon's estimate. Its ten control tests do not qualify a live window.
 
 Run only in a declared maintenance window. Preserve failed runs. A failed
 post-stop check leaves services stopped for investigation; never automatically
