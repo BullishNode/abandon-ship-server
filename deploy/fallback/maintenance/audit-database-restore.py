@@ -6,19 +6,28 @@ on the target. This qualifies restore mechanics; frozen final-state audit and
 independent witness reconciliation remain necessary.
 """
 from pathlib import Path
-import datetime,hashlib,json,os,re,subprocess,sys
+import argparse,datetime,hashlib,json,os,re,subprocess,sys
 
 ROOT=Path.home()/'abandon-signet-fallback/deploy'
 SOURCE='bark-server-db'
 
 def main():
     os.umask(0o077)
-    assert len(sys.argv)==2
-    out=Path(sys.argv[1]);out.mkdir(mode=0o700,parents=False,exist_ok=False)
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('output',type=Path)
+    parser.add_argument('--frozen',action='store_true')
+    parser.add_argument('--archive',type=Path,help='audit this actual existing archive; requires frozen writers')
+    args=parser.parse_args();frozen=args.frozen
+    assert not args.archive or frozen,'external archive audit requires frozen writers'
+    out=args.output;out.mkdir(mode=0o700,parents=False,exist_ok=False)
     name='fallback_restore_audit_'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')
     assert re.fullmatch('fallback_restore_audit_[0-9]{14}',name)
     base=['sudo','./fallback/dcf','exec','-T','fb-postgres']
     psql=base+['psql','-X','-qAt','-v','ON_ERROR_STOP=1','-U','postgres']
+    if frozen:
+        for service in ['fb-captaind','fb-watchmand','fb-barkd','fb-barkd2']:
+            state=json.loads(subprocess.check_output(['sudo','docker','inspect','abandon-signet-fallback-'+service+'-1'],text=True))[0]['State']
+            assert not state['Running'] and state['Pid']==0,'frozen audit requires all owned writers stopped'
     def sql(db,text):
         return subprocess.check_output(psql+['-d',db],input=text,text=True,cwd=ROOT).strip()
     owner=subprocess.Popen(psql+['-d',SOURCE],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,cwd=ROOT)
@@ -27,10 +36,13 @@ def main():
         snapshot=owner.stdout.readline().strip()
         assert re.fullmatch('[0-9A-F]+-[0-9A-F]+-[0-9]+',snapshot),'snapshot export failed'
         tables=json.loads(sql(SOURCE,"SELECT COALESCE(jsonb_agg(jsonb_build_array(schemaname,tablename) ORDER BY schemaname,tablename),'[]'::jsonb) FROM pg_tables WHERE schemaname NOT LIKE 'pg_%' AND schemaname!='information_schema';"))
-        archive=out/'snapshot.dump'
-        with archive.open('xb') as stream:
-            p=subprocess.run(base+['pg_dump','-U','postgres','-d',SOURCE,'--format=custom','--snapshot',snapshot],stdout=stream,stderr=subprocess.PIPE,cwd=ROOT)
-            assert p.returncode==0,'snapshot dump failed'
+        archive=args.archive or out/'snapshot.dump'
+        if args.archive:
+            assert archive.is_file(),'declared frozen archive is missing'
+        else:
+            with archive.open('xb') as stream:
+                p=subprocess.run(base+['pg_dump','-U','postgres','-d',SOURCE,'--format=custom','--snapshot',snapshot],stdout=stream,stderr=subprocess.PIPE,cwd=ROOT)
+                assert p.returncode==0,'snapshot dump failed'
         subprocess.run(base+['createdb','-U','postgres',name],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
         with archive.open('rb') as stream:
             p=subprocess.run(base+['pg_restore','-U','postgres','--dbname',name,'--exit-on-error','--no-owner'],stdin=stream,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,cwd=ROOT)
@@ -75,11 +87,21 @@ def main():
             return raw
         normalized_before=canonical_schema(before_schema);normalized_after=canonical_schema(after_schema)
         assert normalized_before==normalized_after,'restored schema differs after validated dump-nonce normalization'
+        sequences=[]
+        if frozen:
+            sequence_names=json.loads(sql(SOURCE,"SELECT COALESCE(jsonb_agg(jsonb_build_array(schemaname,sequencename) ORDER BY schemaname,sequencename),'[]'::jsonb) FROM pg_sequences WHERE schemaname NOT LIKE 'pg_%';"))
+            for sequence in sequence_names:
+                ident='.'.join('"'+v.replace('"','""')+'"' for v in sequence)
+                query="SELECT jsonb_build_object('last_value',last_value,'is_called',is_called) FROM "+ident+";"
+                before=json.loads(sql(SOURCE,query));after=json.loads(sql(name,query))
+                sequences.append({'sequence':'.'.join(sequence),'snapshot':before,'restored':after,'matches':before==after})
+                assert before==after,'restored sequence differs'
+            (out/'sequence-checks.json').write_text(json.dumps(sequences,indent=2)+'\n')
         result={'utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'result':'PASS_CONSISTENT_SNAPSHOT_ISOLATED_RESTORE',
           'source_database':SOURCE,'audit_database':name,'tables':len(checks),'rows':sum(x['snapshot']['rows'] for x in checks),
-          'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'schema_sha256':hashlib.sha256(normalized_before).hexdigest(),'schema_normalization':'only one internally matching pg_dump restrict/unrestrict nonce; all other bytes identical',
-          'live_database_restored':False,'captaind_started':False,'keys_and_archives':'remain private on target',
-          'scope':'consistent live snapshot data and schema restored exactly; sequences under live writes and frozen final-state/witness qualification remain outstanding'}
+          'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'archive_path':str(archive),'existing_archive_audited':bool(args.archive),'schema_sha256':hashlib.sha256(normalized_before).hexdigest(),'schema_normalization':'only one internally matching pg_dump restrict/unrestrict nonce; all other bytes identical',
+          'live_database_restored':False,'captaind_started':False,'frozen_writers':frozen,'sequences_checked':len(sequences),'keys_and_archives':'remain private on target',
+          'scope':('frozen snapshot data/schema/sequence values restored exactly; independent witness/history qualification remains outstanding' if frozen else 'consistent live snapshot data/schema restored exactly; sequences under live writes and frozen final-state/witness qualification remain outstanding')}
         (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
     finally:
         if owner.poll() is None:
