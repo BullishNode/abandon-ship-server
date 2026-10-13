@@ -22,6 +22,9 @@ def request(raw):
     if len(raw)>4096:raise ValueError('request bound exceeded')
     value=json.loads(raw)
     if not isinstance(value,dict):raise ValueError('invalid bridge request')
+    if value.get('kind')=='release_identity':
+        if set(value)!={'kind'}:raise ValueError('release identity takes no arguments')
+        return 'release_identity',None
     if value.get('kind')=='rounds_descriptor':
         if set(value)!={'kind'}:raise ValueError('descriptor takes no arguments')
         return 'rounds_descriptor',None
@@ -119,6 +122,8 @@ def page(kind,after):
         'validation_scope':'trusted server claims; independently verify chain, backing, signatures and rightful ownership'}
 
 def collect(kind,after):
+    if kind=='release_identity':
+        return json.loads(run(['sudo','-n','python3','/opt/abandon-simulation/release-observation.py']))
     if kind=='logs':return logs(after)
     if kind=='rounds_descriptor':return {'kind':kind,'declaration':json.loads(DESCRIPTOR.read_text())}
     if kind=='binding_check':

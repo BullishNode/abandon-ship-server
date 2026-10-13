@@ -5,6 +5,15 @@ spec=importlib.util.spec_from_file_location('server_bridge',Path(__file__).resol
 bridge=importlib.util.module_from_spec(spec);spec.loader.exec_module(bridge)
 
 class BridgeTest(unittest.TestCase):
+    def test_release_receipt_has_no_caller_selected_commands_or_paths(self):
+        self.assertEqual(('release_identity',None),bridge.request(b'{"kind":"release_identity"}'))
+        for field in ['after','command','path','head','txids']:
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                bridge.request(json.dumps({'kind':'release_identity',field:'anything'}).encode())
+        with patch.object(bridge,'run',return_value='{"kind":"release_identity","schema_version":1}') as run:
+            result=bridge.collect('release_identity',None)
+        self.assertEqual(1,result['schema_version'])
+        self.assertEqual(['sudo','-n','python3','/opt/abandon-simulation/release-observation.py'],run.call_args.args[0])
     def test_untrusted_request_cannot_select_mutations_or_sql(self):
         for request in [ {'kind':'cli','method':'sendtoaddress'}, {'kind':'coins','after':"'; DROP TABLE vtxo;--"},
                          {'kind':'coins','after':'$(touch /tmp/x)'}, {'kind':'snapshot','after':'coin'},

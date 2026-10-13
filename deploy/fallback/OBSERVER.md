@@ -50,6 +50,35 @@ deduplicate by service and complete event identity. Capture often enough to
 cover tick summaries and waiting reasons; do not infer a successful tick from
 an empty or truncated reply.
 
+## Deployed release and preserved payout accounting
+
+For the owned 8f signet upgrade, also install `release-observation.py` beside
+the bridge, root-owned and not writable by the observer. Its paths are fixed;
+the caller cannot choose a backup, executable, query, witness directory or
+transaction. It uses ubuntu's existing administrative permission to read the
+private witness, returning only public identity, counts and file commitments.
+
+```json
+{"kind":"release_identity"}
+```
+
+The versioned receipt checks native versions and hashes, hashes the running
+daemon executables, binds the actual image/container/start time, reads the
+mounted ordinary/pool lifetimes and payout policy, and compares all frozen
+upgrade transaction bytes and immutable settlement destinations/fees with one
+repeatable-read database snapshot. It also compares the current witness records
+against that snapshot, without returning raw witness contents. Mismatch arrays
+must be empty before treating preservation as satisfied.
+
+The guard startup statement is grounded in the verified native `start` process,
+payouts enabled, healthy administrative RPC, and the source's pre-worker witness
+validation. It is not a claimed log event or a destructive restore test. The
+frozen baseline remains trusted operator evidence. Native witness files stay
+private, and the operation never initializes or repairs them. Service/config
+changes during observation fail the request; retry a failed read, never infer
+that a service stopped. Baseline, witness, output and database deadlines are
+bounded; this upgrade-specific receipt does not replace campaign inventories.
+
 ## Validation
 
 ```bash
