@@ -1,0 +1,25 @@
+[Unit]
+Description=Owned signet forwarding wallet with qualified fork SDK
+After=network-online.target noah-target-tunnel.service
+Wants=network-online.target noah-target-tunnel.service
+
+[Service]
+User=noah-forwarder
+Group=noah-forwarder
+WorkingDirectory=/var/lib/noah-forwarder
+ExecStart=/opt/noah-forwarder/bin/barkd --datadir /var/lib/noah-forwarder/wallet --host 127.0.0.2 --port 3000 --no-logfile
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/noah-forwarder
+IPAddressDeny=any
+IPAddressAllow=localhost
+MemoryMax=2G
+LimitNOFILE=8192
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

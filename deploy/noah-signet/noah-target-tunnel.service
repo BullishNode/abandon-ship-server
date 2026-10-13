@@ -1,0 +1,17 @@
+[Unit]
+Description=Noah signet backend to owned captaind through a restricted SSH key
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+ExecStart=/usr/bin/ssh -NT -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_noah_target -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -i /home/ubuntu/.ssh/id_ed25519_noah_target -L 127.0.0.1:3535:172.19.0.3:3535 -L 127.0.0.1:18332:172.18.0.2:8332 abandon-observer@172.81.182.157
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
