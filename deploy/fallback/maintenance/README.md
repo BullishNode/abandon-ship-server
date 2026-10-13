@@ -1,0 +1,34 @@
+# Signet maintenance preparation
+
+These fork-lead utilities operate on the owned fallback stack only. They do
+not change the simulator or the original signet stack. Private dumps and wallet
+archives remain on the target with owner-only permissions.
+
+- `audit-database-restore.py OUTPUT`: exports a consistent live snapshot and
+  restores into a new audit database; compares every table and the schema.
+  The only schema normalization is PostgreSQL's validated paired dump nonce.
+  It never replaces the live database or starts captaind. Sequences under live
+  writes, the final frozen snapshot and independent history still need checking.
+- `freeze-signet-upgrade-8f.py --coordination JSON --output DIR`: requires a fresh
+  actual simulator pause, zero wallet actions/unknowns and zero global recovery
+  uncertainty, verified target identity and staged images. Stops owned writers,
+  verifies the old PIDs are gone, waits for detached database commits and backs
+  up the frozen database and wallet volumes. Preserves nursery transaction
+  bytes and settlement identities. It installs no witness and starts no service.
+  `--require-pending-payout` additionally requires declared real pending payouts;
+  an ordinary empty-nursery upgrade earns no in-flight qualification credit.
+- `prepare-payout-witness.py`: converts an independently audited inventory into
+  native witness files in a new private directory. Formatting alone is neither
+  complete-history proof nor permission to install or start a daemon.
+
+Run only in a declared maintenance window. Preserve failed runs. A failed
+post-stop check leaves services stopped for investigation; never automatically
+restore an earlier database or initialize an empty witness. Keep the independent
+witness outside the database's restore boundary. Native startup must validate
+it before workers start. The full operator-window order and release gates are
+in the goal handoff; these utilities do not replace them.
+
+Qualification: the isolated live signet snapshot audit passed on 2026-10-13,
+with all 43 tables and 17,605 rows matched; its initial nonce-only comparison
+failure is preserved. Freeze and witness utilities have syntax/help checks;
+this publication does not claim an executed upgrade or restore-guard journey.
