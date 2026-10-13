@@ -7,7 +7,7 @@
 # The UI binds to the VM's loopback only: reach it through an SSH tunnel.
 
 x-fork: &fork
-  image: abandon-ship/captaind:fallback-${FORK_COMMIT}
+  image: abandon-ship/captaind:fallback-${SERVER_FORK_COMMIT:-${FORK_COMMIT}}
   restart: unless-stopped
   networks: [default, signet]
 
