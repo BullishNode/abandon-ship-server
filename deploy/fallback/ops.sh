@@ -26,7 +26,8 @@ sql)
 	sudo ./fallback/dcf exec -T fb-postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d bark-server-db -Atc "$1" ;;
 cli)
 	. "$SIGNET_DEPLOY/state/signet/secrets.env"
-	cd "$SIGNET_DEPLOY" && sudo ./dc signet exec -T bitcoind bitcoin-cli -signet -rpcport=8332 -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" "$@" ;;
+	cd "$SIGNET_DEPLOY"
+	printf '%s\n' "$RPC_PASS" | sudo ./dc signet exec -T bitcoind bitcoin-cli -signet -rpcport=8332 -rpcuser="$RPC_USER" -stdinrpcpass "$@" ;;
 capt)
 	sudo ./fallback/dcf exec -T fb-captaind captaind --config /config/captaind.toml "$@" ;;
 logs)
