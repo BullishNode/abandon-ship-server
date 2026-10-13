@@ -5,6 +5,7 @@ No arbitrary shell/SQL/path/RPC names accepted. This bridge has no client seed o
 mailbox key. Independent chain verification is performed on the simulator host.
 """
 import datetime,json,os,re,selectors,subprocess,sys,time,tomllib
+from decimal import Decimal
 from pathlib import Path
 DEPLOY=Path('/home/ubuntu/abandon-signet-fallback/deploy')
 CONTAINER='abandon-signet-fallback-fb-captaind-1'
@@ -22,6 +23,9 @@ def request(raw):
     if len(raw)>4096:raise ValueError('request bound exceeded')
     value=json.loads(raw)
     if not isinstance(value,dict):raise ValueError('invalid bridge request')
+    if value.get('kind')=='pool_status':
+        if set(value)!={'kind'}:raise ValueError('pool status takes no arguments')
+        return 'pool_status',None
     if value.get('kind')=='release_identity':
         if set(value)!={'kind'}:raise ValueError('release identity takes no arguments')
         return 'release_identity',None
@@ -121,7 +125,73 @@ def page(kind,after):
     return {'kind':kind,'rows':rows,'next':rows[-1][field] if more else None,'inventory_consistent':False,
         'validation_scope':'trusted server claims; independently verify chain, backing, signatures and rightful ownership'}
 
+def pool_status():
+    before=json.loads(ops('cli','getblockchaininfo'))
+    declaration=json.loads(DESCRIPTOR.read_text())
+    genesis=ops('cli','getblockhash','0').strip().strip('"')
+    if genesis!=declaration['genesis'] or before['chain']!=declaration['network']:
+        raise ValueError('pool chain identity differs')
+    cfg=tomllib.loads((DEPLOY/'state/signet-fallback/captaind.toml').read_text())
+    expiry_margin=cfg['vtxopool']['vtxo_pre_expiry']
+    if type(expiry_margin) is not int or expiry_margin<0:raise ValueError('invalid pool expiry margin')
+    cutoff=before['blocks']+expiry_margin
+    # Aggregate by real funding anchor, not by wallet or customer. Never emit
+    # signed VTXO bytes, unlock preimages or private descriptors.
+    sql=("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='8s'; "
+        "SELECT jsonb_build_object('unspent_count',(SELECT count(*) FROM vtxo_pool WHERE spent_at IS NULL),"
+        "'anchors',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT "
+        "encode(substring(vtxo from 50 for 32),'hex') anchor_txid_le,"
+        "encode(substring(vtxo from 82 for 4),'hex') anchor_vout_le,"
+        "encode(substring(vtxo from 15 for 33),'hex') server_pubkey,"
+        "encode(substring(vtxo from 1 for 2),'hex') encoding_version,"
+        "count(*) coin_count,sum(amount) amount_sat,min(expiry_height) minimum_expiry "
+        "FROM vtxo_pool WHERE spent_at IS NULL AND expiry_height>"+str(cutoff)+
+        " GROUP BY 1,2,3,4 ORDER BY 1,2 LIMIT 33) q)); COMMIT;")
+    objects=[json.loads(line) for line in ops('sql',sql).splitlines() if line.startswith('{')]
+    if len(objects)!=1 or len(objects[0]['anchors'])>32:raise ValueError('pool snapshot bound exceeded')
+    inventory=objects[0];eligible_count=eligible_value=confirmed_count=confirmed_value=0
+    minimum=None
+    def sats(value):
+        result=Decimal(str(value))*100000000
+        if result!=result.to_integral_value() or result<0:raise ValueError('invalid Core amount')
+        return int(result)
+    for anchor in inventory['anchors']:
+        if anchor['server_pubkey']!=declaration['server_pubkey'] or anchor['encoding_version'] not in ('0100','0200'):
+            raise ValueError('pool coin identity or encoding differs')
+        txid=bytes.fromhex(anchor['anchor_txid_le'])[::-1].hex()
+        index=int.from_bytes(bytes.fromhex(anchor['anchor_vout_le']),'little')
+        if len(txid)!=64 or len(anchor['anchor_vout_le'])!=8:raise ValueError('invalid pool anchor')
+        count,value=anchor['coin_count'],anchor['amount_sat']
+        if type(count) is not int or type(value) is not int or min(count,value)<=0:
+            raise ValueError('invalid pool amounts')
+        backing=json.loads(ops('cli','gettxout',txid,str(index),'true'),parse_float=Decimal)
+        eligible_count+=count;eligible_value+=value
+        minimum=anchor['minimum_expiry'] if minimum is None else min(minimum,anchor['minimum_expiry'])
+        if backing and backing.get('confirmations',0)>0 and sats(backing['value'])>=value:
+            confirmed_count+=count;confirmed_value+=value
+    wallet=json.loads(ops('capt','rpc','wallet'))['rounds']
+    points=wallet['confirmed_utxos']
+    if len(points)>32:raise ValueError('rounds confirmed inventory bound exceeded')
+    confirmed_balance=0
+    for point in points:
+        txid,index=point.rsplit(':',1)
+        if not re.fullmatch('[0-9a-f]{64}',txid) or not index.isdigit():raise ValueError('invalid rounds outpoint')
+        output=json.loads(ops('cli','gettxout',txid,index,'true'),parse_float=Decimal)
+        if output and output.get('confirmations',0)>0:confirmed_balance+=sats(output['value'])
+    ending=json.loads(ops('cli','getblockchaininfo'))
+    return {'kind':'pool_status','schema_version':1,'observed_at':time.time(),
+        'genesis':genesis,'server_pubkey':declaration['server_pubkey'],'height':ending['blocks'],
+        'tip_hash':ending['bestblockhash'],'stable_tip':before['bestblockhash']==ending['bestblockhash'],
+        'pool_pre_expiry_blocks':expiry_margin,
+        'pool':{'unspent_count':inventory['unspent_count'],'eligible_count':eligible_count,
+            'eligible_amount_sat':eligible_value,'confirmed_eligible_count':confirmed_count,
+            'confirmed_eligible_amount_sat':confirmed_value,'minimum_eligible_expiry_height':minimum},
+        'rounds':{'trusted_balance_sat':wallet['trusted_balance'],'confirmed_balance_sat':confirmed_balance},
+        'complete':True,'validation_scope':'bounded eligible pool database snapshot and unspent confirmed Core backing; '
+            'not a wallet reservation, complete liability ledger or guarantee against a concurrent native pool spend'}
+
 def collect(kind,after):
+    if kind=='pool_status':return pool_status()
     if kind=='release_identity':
         return json.loads(run(['sudo','-n','python3','/opt/abandon-simulation/release-observation.py']))
     if kind=='logs':return logs(after)

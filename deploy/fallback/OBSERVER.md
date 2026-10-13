@@ -81,6 +81,25 @@ bounded; this upgrade-specific receipt does not replace campaign inventories.
 
 ## Validation
 
+The fixed `pool_status` operation takes no arguments:
+
+```json
+{"kind":"pool_status"}
+```
+
+It reports unspent pool coins beyond the configured pre-expiry margin, grouped
+by funding anchor. The confirmed subset requires Core to report that anchor
+unspent with confirmed value covering the remaining pool group. Server key and
+chain identity must match the operator's public descriptor declaration. At most
+32 eligible anchors and 32 confirmed rounds-wallet outpoints are inspected; a
+larger inventory refuses rather than silently returning a partial total.
+
+`complete` applies only to this bounded pool snapshot. It does not mean the
+customer-liability ledger is complete or reserve the coins against a concurrent
+pool consumer. Require a fresh, stable tip and positive confirmed pool capacity
+before dispatch. Zero confirmed liquidity and positive trusted wallet change
+are different states; the operator-health helper reports them separately.
+
 ```bash
 python3 -m unittest discover -s deploy/fallback/tests -v
 ```
