@@ -1,0 +1,20 @@
+[package]
+name = "rounds-wallet-maintenance"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+server = { package = "bark-server", path = "../sdk/server" }
+bitcoin_ext = { package = "bark-bitcoin-ext", path = "../sdk/bitcoin-ext", features = ["rpc-async", "bdk"] }
+bitcoin = { version = "0.32.7", features = ["serde"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.35", features = ["macros", "rt-multi-thread"] }
+
+[profile.dev]
+debug = 0
+incremental = false
