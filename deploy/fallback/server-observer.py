@@ -104,8 +104,8 @@ def page(kind,after):
          "'subscription_settled',EXISTS (SELECT 1 FROM lightning_htlc_subscription r WHERE r.payment_hash=h.payment_hash AND r.status='settled')) FROM htlc_vtxo h JOIN vtxo v ON v.id=h.id WHERE v.vtxo_id=s.id) AS htlc"),
       'coins':("v.vtxo_id","vtxo v","v.vtxo_id,v.id,v.expiry,v.spend_state,v.policy_type,encode(v.vtxo,'hex') AS signed_vtxo,v.onchain_spent_txid,v.onchain_spent_height,v.confirmed_height,v.oor_spent_txid,v.spent_in_round,v.offboarded_in"),
       'pending':("p.vtxo_id","pending_board p","p.vtxo_id,p.id,p.expiry,encode(p.vtxo,'hex') AS signed_vtxo"),
-      'links':("encode(l.user_pubkey,'hex')","key_link l","encode(l.user_pubkey,'hex') AS user_pubkey,encode(l.mailbox_pk,'hex') AS mailbox_pk,encode(l.sig,'hex') AS sig"),
-      'records':("encode(r.mailbox_pk,'hex')","fallback_record r","encode(r.mailbox_pk,'hex') AS mailbox_pk,encode(r.spk,'hex') AS spk,r.seq,encode(r.sig,'hex') AS sig"),
+      'links':("encode(l.user_pubkey,'hex')","key_link l","encode(l.user_pubkey,'hex') AS user_pubkey,encode(l.mailbox_pk,'hex') AS mailbox_pk,l.child_index"),
+      'records':("encode(r.mailbox_pk,'hex')","fallback_record r","encode(r.mailbox_pk,'hex') AS mailbox_pk,encode(r.spk,'hex') AS spk,encode(r.account_xpub,'hex') AS account_xpub,encode(r.mailbox_sig,'hex') AS mailbox_sig,encode(r.account_sig,'hex') AS account_sig"),
       'nursery':("n.txid","nursery_tx n","n.txid,encode(n.tx,'hex') AS raw_tx,n.kind,n.confirmed_at_height,n.abandoned_at")}
     key,table,columns=tables[kind]
     # Cursor whitelist contains no quotes/operators. All table/column names fixed.
@@ -115,7 +115,7 @@ def page(kind,after):
     if len(arrays)!=1:raise ValueError('unrecognized bridge database response')
     rows=json.loads(arrays[0]);more=len(rows)>100;rows=rows[:100]
     field={'settlements':'id','coins':'vtxo_id','pending':'vtxo_id','links':'user_pubkey','records':'mailbox_pk','nursery':'txid'}[kind]
-    return {'kind':kind,'rows':rows,'next':rows[-1][field] if more else None,'inventory_consistent':False,
+    return {'kind':kind,'fallback_protocol':3,'rows':rows,'next':rows[-1][field] if more else None,'inventory_consistent':False,
         'validation_scope':'trusted server claims; independently verify chain, backing, signatures and rightful ownership'}
 
 def collect(kind,after):
@@ -125,12 +125,12 @@ def collect(kind,after):
         def byte_array(items):return 'ARRAY['+','.join("decode('"+item+"','hex')" for item in items)+']::bytea[]'
         mailboxes=byte_array(after['mailboxes']);keys=byte_array(after['keys'])
         sql=("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='8s'; SELECT jsonb_build_object("
-            "'records',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT encode(mailbox_pk,'hex') AS mailbox_pk,encode(spk,'hex') AS spk,seq,encode(sig,'hex') AS sig FROM fallback_record WHERE mailbox_pk=ANY("+mailboxes+")) q),"
-            "'links',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT encode(user_pubkey,'hex') AS user_pubkey,encode(mailbox_pk,'hex') AS mailbox_pk,encode(sig,'hex') AS sig FROM key_link WHERE user_pubkey=ANY("+keys+")) q)); COMMIT;")
+            "'records',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT encode(mailbox_pk,'hex') AS mailbox_pk,encode(spk,'hex') AS spk,encode(account_xpub,'hex') AS account_xpub,encode(mailbox_sig,'hex') AS mailbox_sig,encode(account_sig,'hex') AS account_sig FROM fallback_record WHERE mailbox_pk=ANY("+mailboxes+")) q),"
+            "'links',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT encode(user_pubkey,'hex') AS user_pubkey,encode(mailbox_pk,'hex') AS mailbox_pk,child_index FROM key_link WHERE user_pubkey=ANY("+keys+")) q)); COMMIT;")
         lines=[line for line in ops('sql',sql).splitlines() if line.startswith('{')]
         if len(lines)!=1:raise ValueError('invalid binding response')
         result=json.loads(lines[0])
-        return {'kind':kind,'mailboxes':after['mailboxes'],'keys':after['keys'],**result,'inventory_consistent':True,
+        return {'kind':kind,'fallback_protocol':3,'mailboxes':after['mailboxes'],'keys':after['keys'],**result,'inventory_consistent':True,
             'validation_scope':'one bounded read-only database snapshot of the requested public records and links'}
     if kind!='snapshot':return page(kind,after)
     before=json.loads(ops('cli','getblockchaininfo'))

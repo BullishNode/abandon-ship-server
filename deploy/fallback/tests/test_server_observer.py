@@ -45,3 +45,23 @@ class BindingBridgeTest(unittest.TestCase):
             req={'kind':'binding_check','mailboxes':['02'+'1'*64],'keys':[]};req[field]=value
             with self.subTest(field=field,value=value),self.assertRaises((ValueError,TypeError)):
                 bridge.request(json.dumps(req).encode())
+
+class ImmutableBindingBridgeTest(unittest.TestCase):
+    def test_v3_public_record_and_child_queries_have_no_mutable_fields(self):
+        req={'kind':'binding_check','mailboxes':['02'+'1'*64],'keys':['03'+'2'*64]}
+        kind,arg=bridge.request(json.dumps(req).encode())
+        with patch.object(bridge,'ops',return_value='BEGIN\nSET\n{"records":[],"links":[]}\nCOMMIT\n') as ops:
+            result=bridge.collect(kind,arg)
+        sql=ops.call_args.args[1]
+        self.assertEqual(result['fallback_protocol'],3)
+        for field in ['account_xpub','mailbox_sig','account_sig','child_index']:
+            self.assertIn(field,sql)
+        self.assertNotIn('seq',sql)
+        self.assertNotIn('encode(sig,',sql)
+        self.assertIn('REPEATABLE READ READ ONLY',sql)
+
+    def test_old_schema_failure_is_never_an_empty_valid_account_inventory(self):
+        for kind in ['records','links']:
+            with self.subTest(kind=kind),patch.object(bridge,'ops',side_effect=RuntimeError('missing v3 column')):
+                with self.assertRaises(RuntimeError):
+                    bridge.page(kind,'')
