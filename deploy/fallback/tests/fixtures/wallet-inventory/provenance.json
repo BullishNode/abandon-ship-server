@@ -1,0 +1,21 @@
+{
+  "fixtures": [
+    {
+      "file": "native-rounds.json",
+      "sha256": "2ce8abd20486623d0e9413969ee55273aba459a4dd5d10cd4c99dad6bbac62f1",
+      "producer_commit": "2b1cab37697600c23ddb1f106b6b92b08e308438",
+      "source_evidence": "/home/francis/bark-integration-2026-10-01/sweep-to-payout-evidence-2026-10-13/noah/wallet-inventory/rounds-wallet-inventory.json",
+      "scope": "Unchanged actual local regtest owning-daemon CLI source frame; no live target, global epoch, financial-readiness or direct-route qualification"
+    },
+    {
+      "file": "native-watchman.json",
+      "sha256": "bb64d044381cdf23a512a33fdbd2cfdb57d7b7e526a0632623f5dc06d8b70626",
+      "producer_commit": "3b4ba783052df11e28691ba6c4418d276d7ef418",
+      "source_evidence": "/home/francis/bark-integration-2026-10-01/sweep-to-payout-evidence-2026-10-13/noah/watchman-wallet-inventory/watchman-wallet-inventory.json",
+      "scope": "Unchanged actual local regtest owning-daemon CLI source frame; no live target, global epoch, financial-readiness or direct-route qualification"
+    }
+  ],
+  "separate_native_runs": true,
+  "globally_atomic": false,
+  "private_keys_seeds_credentials_preimages": false
+}

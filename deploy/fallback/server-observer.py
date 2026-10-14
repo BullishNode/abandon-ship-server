@@ -17,8 +17,8 @@ FINANCIAL_TABLES={'coins','pending_boards','links','records','pool','lightning_n
     'htlcs','receives','payments','participations','participation_inputs','participation_outputs'}
 READ_DEADLINE=None
 
-def run(argv):
-    remaining=20 if READ_DEADLINE is None else min(20,READ_DEADLINE-time.monotonic())
+def run(argv,timeout=20):
+    remaining=timeout if READ_DEADLINE is None else min(timeout,READ_DEADLINE-time.monotonic())
     if remaining<=0:raise ValueError('financial observation deadline exceeded')
     deadline=time.monotonic()+remaining;data=bytearray()
     with subprocess.Popen(argv,cwd=DEPLOY,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL) as child:
@@ -238,6 +238,118 @@ def public_wallet_declarations(genesis):
     return {'available':True,'verified':True,'wallets_declared_complete':seen=={'rounds','watchman'},'wallets':wallets,
         'validation_scope':'canonical public descriptor syntax/network declaration verified; daemon ownership and current signer inventory still require independent runtime proof'}
 
+# Literal existing containers/admin sockets. Do not source deployment .env,
+# read private config/keymaps, invoke status(), or accept request-selected argv.
+WALLET_SOURCES={
+    'rounds':('captaind','abandon-signet-fallback-fb-captaind-1','127.0.0.1:3536'),
+    'watchman':('watchmand','abandon-signet-fallback-fb-watchmand-1','127.0.0.1:3538'),
+}
+WALLET_FIELDS={'wallet','network','public_descriptor','tip_height','tip_hash',
+    'min_trusted_confirmations','utxos','complete','reserved_outpoints','last_revealed_index'}
+UTXO_FIELDS={'outpoint','value_sat','script_pubkey','keychain','derivation_index',
+    'confirmed_height_upper_bound','confirmation_block_hash','unconfirmed_first_seen','unconfirmed_last_seen',
+    'coinbase','confirmations','mature','trusted','reserved','transaction_eligible','confirmed_fee_eligible',
+    'confirming_descendant_txid','confirmation_time'}
+
+
+def bounded_integer(value,upper,nullable=False):
+    if nullable and value is None:return
+    if type(value) is not int or not 0<=value<=upper:raise ValueError('invalid public wallet integer')
+
+
+def public_hash(value,nullable=False):
+    if nullable and value is None:return
+    if not isinstance(value,str) or not re.fullmatch(r'[0-9a-f]{64}',value):raise ValueError('invalid public wallet hash')
+
+
+def public_outpoint(value):
+    if not isinstance(value,str) or not re.fullmatch(r'[0-9a-f]{64}:(0|[1-9][0-9]{0,9})',value):
+        raise ValueError('invalid public wallet outpoint')
+    bounded_integer(int(value.split(':')[1]),2**32-1)
+
+
+def validate_wallet_frame(value,owner,network):
+    # Reject unknown fields, especially private additions, instead of exporting
+    # or silently sanitizing a partial source as a complete wallet snapshot.
+    if not isinstance(value,dict) or set(value)!={'rounds','watchman','complete','missing_sources'} or value['complete'] is not False:
+        raise ValueError('invalid owning-wallet response')
+    opposite='watchman' if owner=='rounds' else 'rounds'
+    expected=('watchmand owns its wallet; inventory unavailable from captaind' if owner=='rounds' else
+        'captaind owns its rounds wallet; collect its separate source without assuming global atomicity')
+    if value[opposite] is not None or value['missing_sources']!=[expected]:raise ValueError('invalid separate-owner scope')
+    wallet=value[owner]
+    if not isinstance(wallet,dict) or set(wallet)!=WALLET_FIELDS or wallet['wallet']!=owner or wallet['network']!=network or wallet['complete'] is not True:
+        raise ValueError('incomplete or incompatible owning-wallet snapshot')
+    descriptor=wallet['public_descriptor']
+    if not isinstance(descriptor,str) or len(descriptor)>1024 or not re.fullmatch(r'[a-zA-Z0-9\[\]/(),#*<>;\x27]+',descriptor):
+        raise ValueError('invalid public descriptor')
+    if re.search(r'xprv|tprv|(?:^|[^1-9A-HJ-NP-Za-km-z])[59cKL][1-9A-HJ-NP-Za-km-z]{50,51}(?:[^1-9A-HJ-NP-Za-km-z]|$)',descriptor):
+        raise ValueError('private descriptor refused')
+    bounded_integer(wallet['tip_height'],2**32-1);public_hash(wallet['tip_hash'])
+    bounded_integer(wallet['min_trusted_confirmations'],2**32-1)
+    if wallet['min_trusted_confirmations']==0:raise ValueError('invalid wallet trust threshold')
+    bounded_integer(wallet['last_revealed_index'],2**32-1,True)
+    rows=wallet['utxos'];reserved=wallet['reserved_outpoints']
+    if not isinstance(rows,list) or len(rows)>FINANCIAL_ROW_LIMIT or not isinstance(reserved,list) or len(reserved)>FINANCIAL_ROW_LIMIT:
+        raise ValueError('owning-wallet row budget exceeded')
+    for point in reserved:public_outpoint(point)
+    if len(set(reserved))!=len(reserved):raise ValueError('duplicate wallet reservation')
+    seen=set()
+    for row in rows:
+        if not isinstance(row,dict) or set(row)!=UTXO_FIELDS:raise ValueError('invalid public UTXO fields')
+        public_outpoint(row['outpoint'])
+        if row['outpoint'] in seen:raise ValueError('duplicate wallet UTXO')
+        seen.add(row['outpoint'])
+        bounded_integer(row['value_sat'],21_000_000*100_000_000)
+        bounded_integer(row['derivation_index'],2**32-1);bounded_integer(row['confirmations'],2**32-1)
+        if row['keychain'] not in {'external','internal'} or not isinstance(row['script_pubkey'],str) or not re.fullmatch(r'(?:[0-9a-f]{2}){1,10000}',row['script_pubkey']):
+            raise ValueError('invalid public UTXO script or keychain')
+        for key in ('coinbase','mature','trusted','reserved','transaction_eligible','confirmed_fee_eligible'):
+            if type(row[key]) is not bool:raise ValueError('invalid public UTXO boolean')
+        height=row['confirmed_height_upper_bound'];bounded_integer(height,wallet['tip_height'],True)
+        public_hash(row['confirming_descendant_txid'],True)
+        for key in ('confirmation_time','unconfirmed_first_seen','unconfirmed_last_seen'):bounded_integer(row[key],2**64-1,True)
+        if height is None:
+            if row['confirmations']!=0 or any(row[key] is not None for key in ('confirmation_block_hash','confirming_descendant_txid','confirmation_time')):
+                raise ValueError('invalid unconfirmed wallet position')
+        else:
+            public_hash(row['confirmation_block_hash'])
+            if row['confirmation_time'] is None or row['confirmations']!=wallet['tip_height']-height+1 or row['unconfirmed_first_seen'] is not None or row['unconfirmed_last_seen'] is not None:
+                raise ValueError('invalid confirmed wallet position')
+        mature=not row['coinbase'] or row['confirmations']>=100
+        eligible=row['trusted'] and mature and not row['reserved']
+        if row['reserved']!=(row['outpoint'] in reserved) or row['mature']!=mature or row['transaction_eligible']!=eligible or row['confirmed_fee_eligible']!=(eligible and height is not None):
+            raise ValueError('inconsistent public wallet eligibility')
+    return value
+
+
+def owning_wallet_inventory(owner,network):
+    service,container,address=WALLET_SOURCES[owner];started=time.time()
+    frame={'service':service,'observed_at':started,'completed_at':None,'available':False,
+        'source':None,'descriptor_public_canonical_checked':False,'missing_source':None}
+    try:
+        raw=run(['sudo','-n','docker','exec',container,'captaind','rpc','--addr',address,'wallet-inventory'],timeout=4)
+        if len(raw.encode())>MAX_BYTES:raise ValueError('owning-wallet byte budget exceeded')
+        source=validate_wallet_frame(json.loads(raw),owner,network)
+        descriptor=source[owner]['public_descriptor']
+        details=json.loads(ops('cli','getdescriptorinfo',descriptor))
+        if not isinstance(details,dict) or details.get('hasprivatekeys') is not False or details.get('isrange') is not True or details.get('descriptor')!=descriptor:
+            raise ValueError('canonical public ranged descriptor required')
+        frame.update(available=True,source=source,descriptor_public_canonical_checked=True)
+    except (ValueError,TypeError,KeyError,subprocess.SubprocessError,UnicodeError,OSError):
+        # Do not echo failed child output, credentials or detailed RPC errors.
+        frame['missing_source']='fixed_'+service+'_wallet_inventory_unavailable_unsupported_or_invalid'
+    frame['completed_at']=time.time()
+    return frame
+
+
+def runtime_wallet_inventory(network):
+    frames={owner:owning_wallet_inventory(owner,network) for owner in ('rounds','watchman')}
+    return {'frames':frames,'separate_frames':True,'globally_atomic':False,
+        'owning_sources_available':all(frame['available'] for frame in frames.values()),
+        'complete':False,'qualified':False,
+        'validation_scope':'bounded original public owning-wallet sources collected separately; syntax/trust/lock flags are not global financial authorization or globally atomic treasury proof'}
+
 def _financial_readiness():
     started=time.time();before=json.loads(ops('cli','getblockchaininfo'))
     genesis=ops('cli','getblockhash','0').strip().strip('"')
@@ -249,14 +361,21 @@ def _financial_readiness():
         images[service]=json.loads(run(['sudo','-n','docker','inspect','--format',
             '{"image_digest":{{json .Image}},"status":{{json .State.Status}},"restarts":{{json .RestartCount}}}',container]))
     declarations=public_wallet_declarations(genesis);candidates=claimant_inventory()
+    wallets=runtime_wallet_inventory(before['chain'])
     ending=json.loads(ops('cli','getblockchaininfo'))
     stable=before['bestblockhash']==ending['bestblockhash']
-    gaps=['runtime_wallet_inventory_with_canonical_positions_and_active_input_locks',
-        'deployed_product_commit_and_sdk_driver_schema_pins',
+    gaps=['deployed_product_commit_and_sdk_driver_schema_pins',
         'resolved_claimant_and_physical_backing_membership',
         'loaded_runtime_configuration_identity_and_enforced_path_caps',
         'epoch_budget_and_inflight_capital_consumption',
         'lightning_full_owned_channel_balances_and_selected_route_readiness']
+    if not wallets['owning_sources_available']:gaps.append('runtime_wallet_inventory_with_canonical_positions_and_active_input_locks')
+    for owner,frame in wallets['frames'].items():
+        if not frame['available']:gaps.append(frame['missing_source'])
+        elif (frame['source'][owner]['tip_height'],frame['source'][owner]['tip_hash'])!=(ending['blocks'],ending['bestblockhash']):
+            gaps.append(owner+'_wallet_source_tip_not_current')
+    if wallets['owning_sources_available'] and wallets['frames']['rounds']['source']['rounds']['public_descriptor']==wallets['frames']['watchman']['source']['watchman']['public_descriptor']:
+        gaps.append('owning_wallet_sources_duplicate_descriptor')
     if not declarations.get('wallets_declared_complete'):gaps.append('public_rounds_and_watchman_wallet_declarations')
     if candidates['truncated_tables']:gaps.append('bounded_candidate_inventory_truncated')
     if not stable:gaps.append('chain_tip_changed')
@@ -265,7 +384,7 @@ def _financial_readiness():
         'network':ending['chain'],'genesis':genesis,'height':ending['blocks'],'tip_hash':ending['bestblockhash'],
         'stable_tip':stable,'images':images,'disk_config':configs,'wallet_declarations':declarations,
         'candidate_inventory':candidates,
-        'runtime_wallet_inventory':None,'effective_fee_ceilings_sat_kvb':None,
+        'runtime_wallet_inventory':wallets,'effective_fee_ceilings_sat_kvb':None,
         'capital_exposure_msat':None,'available_fee_funding_msat':None,
         'budget_remaining_msat':None,'pool_ready':None,'channel_route_ready':None,
         'complete':False,'qualified':False,'gaps':gaps,

@@ -1,0 +1,40 @@
+{
+  "complete": false,
+  "missing_sources": [
+    "watchmand owns its wallet; inventory unavailable from captaind"
+  ],
+  "rounds": {
+    "complete": true,
+    "last_revealed_index": 2,
+    "min_trusted_confirmations": 1,
+    "network": "regtest",
+    "public_descriptor": "tr(tpubD9c5ZbLB8ghkJnHWKEEPTRw9V1qEzXJqSBCJmjpZL3EgcopjFktfYhARtXbT6rWrih42Z4ZHy9pCcZdwHwUgwKWc9Yvckfuptk141WHN681/0/*)#7cfd6a30",
+    "reserved_outpoints": [],
+    "tip_hash": "09560d604216b44a3aaf1c09eb6fbc22ede378c50b912ab39721a95b5372584e",
+    "tip_height": 105,
+    "utxos": [
+      {
+        "coinbase": false,
+        "confirmation_block_hash": "09560d604216b44a3aaf1c09eb6fbc22ede378c50b912ab39721a95b5372584e",
+        "confirmation_time": 1791949685,
+        "confirmations": 1,
+        "confirmed_fee_eligible": true,
+        "confirmed_height_upper_bound": 105,
+        "confirming_descendant_txid": null,
+        "derivation_index": 2,
+        "keychain": "external",
+        "mature": true,
+        "outpoint": "34f1dea9f2fbabd192c41f3ede6e01524b07644e3623fb484f7d7ed5ab8f893e:1",
+        "reserved": false,
+        "script_pubkey": "5120363b106a8b4f6efd99fa623bd658d4242ccef72ca9924238233924140dd2d11b",
+        "transaction_eligible": true,
+        "trusted": true,
+        "unconfirmed_first_seen": null,
+        "unconfirmed_last_seen": null,
+        "value_sat": 1000000
+      }
+    ],
+    "wallet": "rounds"
+  },
+  "watchman": null
+}

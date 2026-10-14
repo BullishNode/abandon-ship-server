@@ -128,20 +128,49 @@ These checks establish public descriptor syntax, not daemon ownership,
 confirmed fee funds or signer availability. Never commit a live declaration.
 
 The financial reply deliberately reports `qualified=false`, `complete=false`,
-null runtime wallet inventories, null effective path ceilings, null capital and
-budget availability, and null pool/channel readiness. Its `gaps` name the
-missing runtime producers. A healthy container, positive pool database row or
-configured fee cap must never be converted into a qualified dispatch event.
+null effective path ceilings, null capital and budget availability, and null
+pool/channel readiness. `runtime_wallet_inventory` contains two separately timed
+owning-daemon source frames when the fixed operation is supported.
+
+Its `gaps` name the missing runtime producers. A healthy container, positive
+pool database row or configured fee cap must never be converted into a qualified
+dispatch event.
 The `snapshot` operation also returns `wallet=null`: the older wallet-status RPC
 reveals a new address in memory, so this observer no longer calls it.
 
-Required fork producers are small read-only getters at the owning daemon:
+The wallet source calls are literal `sudo -n docker exec` arguments in the
+existing `fb-captaind` and `fb-watchmand` containers, using the same `captaind rpc
+--addr ... wallet-inventory` client. Their existing loopback admin addresses are
+`127.0.0.1:3536` and `127.0.0.1:3538`, respectively, as declared by the deployment
+templates. No `.env`, private config or keymap is read to discover these calls.
+There is no caller-selected container, command, socket or RPC method.
 
-- A wallet inventory under its existing wallet guard, without address reveal or
-  secret export. Return the public descriptor and identity, last synchronized
-  canonical tip, minimum trusted confirmations, every confirmed/unconfirmed
-  outpoint with value/script/child index, maturity and active lock status.
-  Identify which confirmed unlocked funds the required signer can actually use.
+Each source read has a four-second child deadline within the whole 20-second
+collection deadline and a two-MiB output limit. The adapter requires the exact
+public source contract, at most 2,000 UTXOs and 2,000 reservations, no duplicates,
+consistent position/maturity/eligibility flags and a complete local inventory.
+Unknown fields, private descriptors, wrong networks and malformed replies are
+refused before export. Public descriptors are checked with the fixed local
+Core `getdescriptorinfo` operation after private-descriptor refusal. These are
+syntax/source checks, not proof of affordable transactions or signer readiness.
+
+Each available frame preserves the original owning response, public descriptor,
+synchronized local tip, loaded trust threshold, UTXO values/scripts/derivations,
+chain positions, maturity/trust and current reservations. Unsupported old targets,
+timeouts, failed reads or invalid contracts produce a named missing source and
+`source:null`; they never fall back to `wallet`/`status`, guessed zero or an empty
+valid wallet. A stale source tip and duplicate owner descriptors add explicit
+gaps. Excessive whole financial output still fails the collection rather than
+returning a qualified prefix.
+
+`separate_frames=true`, `globally_atomic=false`, `complete=false` and
+`qualified=false` remain explicit in the wallet envelope. Two successful local
+wallet reads—even with matching tips—do not establish one atomic treasury epoch,
+complete financial membership or permission to dispatch. The committed native
+CLI fixtures are unchanged public regtest frames from distinct local proven
+runs; replay tests are source-only evidence, not live target qualification.
+
+Still-required fork producers are read-only getters at the owning path:
 - A loaded runtime config identity and effective enforced transaction ceilings
   for rounds, pool, quiet sweeps/direct payout, claims, progression and bumps.
   Report an unimplemented limit as unavailable. Include declared ordinary and

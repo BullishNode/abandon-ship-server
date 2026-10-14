@@ -1,0 +1,40 @@
+{
+  "complete": false,
+  "missing_sources": [
+    "captaind owns its rounds wallet; collect its separate source without assuming global atomicity"
+  ],
+  "rounds": null,
+  "watchman": {
+    "complete": true,
+    "last_revealed_index": 1,
+    "min_trusted_confirmations": 3,
+    "network": "regtest",
+    "public_descriptor": "tr(tpubD9h6LvEpgL7ZkeR3XWQveEmm81qp3rQcBsN8dgkU7mLLbLFUqkLqx3zYVBqMTJgBACHRmAsA6JHhdsPHEzcPDdP32GHn24nPXTukLtHFBV7/0/*)#z7ku4u5v",
+    "reserved_outpoints": [],
+    "tip_hash": "2bbfea31491ab8c2d9daaa4afe3d1ffaa60a3d3d41f59e6e7c3b8f96f96c89ca",
+    "tip_height": 107,
+    "utxos": [
+      {
+        "coinbase": false,
+        "confirmation_block_hash": "00efc588f47a83926d79ae822d7620b46e46bad3b71c8db0c1fe68beb551d98f",
+        "confirmation_time": 1791950621,
+        "confirmations": 3,
+        "confirmed_fee_eligible": true,
+        "confirmed_height_upper_bound": 105,
+        "confirming_descendant_txid": null,
+        "derivation_index": 0,
+        "keychain": "external",
+        "mature": true,
+        "outpoint": "63bcd977fcd975992614477cb2ec39aa234ed3f316e78516acdde340eda098a2:0",
+        "reserved": false,
+        "script_pubkey": "5120345a5539ab922673f1b3fc06dd805735464638e36df12776842226ed576934df",
+        "transaction_eligible": true,
+        "trusted": true,
+        "unconfirmed_first_seen": null,
+        "unconfirmed_last_seen": null,
+        "value_sat": 1000000
+      }
+    ],
+    "wallet": "watchman"
+  }
+}
