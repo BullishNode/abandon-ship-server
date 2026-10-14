@@ -38,7 +38,7 @@ services:
     depends_on:
       fb-postgres: {condition: service_healthy}
     healthcheck:
-      test: [CMD-SHELL, "captaind --config /config/captaind.toml rpc wallet >/dev/null"]
+      test: [CMD-SHELL, "captaind --config /config/captaind.toml rpc wallet-inventory >/dev/null"]
       interval: 10s
       retries: 60
 
@@ -48,7 +48,9 @@ services:
       WATCHMAND_LOG: info
     entrypoint: [/bin/sh, -c, "umask 077; [ -f /data/watchmand/mnemonic ] || cp /data/captaind/mnemonic /data/watchmand/mnemonic; exec watchmand --config /config/watchmand.toml start"]
     volumes:
-      - captaind:/data/captaind:ro
+      # Both trusted daemons validate the same independent direct history;
+      # watchmand must durably append its carrier before Core publication.
+      - captaind:/data/captaind
       - watchmand:/data/watchmand
       - ./state/signet-fallback/watchmand.toml:/config/watchmand.toml:ro
     depends_on:

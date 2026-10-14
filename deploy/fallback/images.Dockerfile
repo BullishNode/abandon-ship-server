@@ -1,5 +1,6 @@
-# Fork images from release binaries built natively (Ubuntu 24.04 glibc) at
-# FORK_COMMIT, CARGO_PROFILE_RELEASE_LTO=false. Context: a directory holding
+# Fork images from qualified portable GNU release binaries at FORK_COMMIT.
+# Record their exact executable hashes and ABI in the release manifest.
+# Context: a directory holding
 # captaind, watchmand, bark and barkd.
 #   docker build -f images.Dockerfile --target captaind -t abandon-ship/captaind:fallback-<commit> <bins>
 #   docker build -f images.Dockerfile --target bark     -t abandon-ship/bark:fallback-<commit> <bins>
