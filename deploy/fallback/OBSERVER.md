@@ -60,3 +60,100 @@ The tests retain existing cursor, binding and read-only checks. They also check
 service and argument restrictions, real oversized child output and redaction.
 Verify both operations live through the observer's existing run-as permissions
 before relying on them. A bridge update requires no server restart.
+
+## Financial source facts
+
+Two fixed requests take no arguments:
+
+```json
+{"kind":"claimant_inventory"}
+{"kind":"financial_readiness"}
+```
+
+`claimant_inventory` reads twelve fixed source tables in one repeatable-read,
+read-only database transaction with an eight-second statement timeout. Each
+table has a 2,000-row limit and one extra row detects truncation. The result
+contains live physical candidates, pending boards, immutable records and links,
+pool rows, known Lightning nodes, payment/receive/HTLC facts and delegated
+participation input/output references. The observation includes spent logical
+ancestors while their physical backing is unswept. Preimages, invoice secrets,
+raw signed forfeits and private keys are never selected. The observation is
+bounded by two MiB; exceeding that limit fails the operation rather than
+returning a partial inventory as complete.
+
+`candidate_tables_complete` means only that the selected candidate tables fit
+the bound in this single database snapshot. `complete` and
+`liability_accounting_complete` remain false. Candidate amounts must not be
+summed as customer liabilities: delegated predecessors and replacements can
+represent one obligation, and internal Lightning rights require arbitration.
+Decode policy bytes to distinguish the exact unspendable padding key; neither
+330 sats nor `unclaimed` alone identifies padding. Resolve physical backing and
+claimant membership independently before counting assets or liabilities.
+
+`financial_readiness` adds the actual Core genesis/tip, before/after tip stability,
+both daemon image digests, hashes of their current disk config files and an
+allowlist of non-secret fee/timing settings. The whole collection has a
+20-second deadline. Disk estimator limits are reported in integer sat/kvB;
+they do not prove which configuration a running daemon loaded or which final
+transaction rates it enforces. In particular, a replacement/progression path
+can add relay fees above an estimator limit.
+
+An optional operator-owned `treasury-wallet-declarations.json`, installed beside
+the script, declares public ranged descriptors:
+
+```json
+{
+  "network": "signet",
+  "genesis": "<actual signet genesis hash>",
+  "wallets": [
+    {
+      "member_id": "operator-rounds",
+      "wallet_kind": "rounds",
+      "identity": "<declared public wallet identity>",
+      "descriptors": ["<canonical public ranged descriptor with checksum>"]
+    },
+    {
+      "member_id": "operator-watchman",
+      "wallet_kind": "watchman",
+      "identity": "<declared public wallet identity>",
+      "descriptors": ["<canonical public ranged descriptor with checksum>"]
+    }
+  ]
+}
+```
+
+Private descriptors are refused before the local Core call. Core must return
+the same canonical descriptor, `hasprivatekeys=false` and `isrange=true`.
+These checks establish public descriptor syntax, not daemon ownership,
+confirmed fee funds or signer availability. Never commit a live declaration.
+
+The financial reply deliberately reports `qualified=false`, `complete=false`,
+null runtime wallet inventories, null effective path ceilings, null capital and
+budget availability, and null pool/channel readiness. Its `gaps` name the
+missing runtime producers. A healthy container, positive pool database row or
+configured fee cap must never be converted into a qualified dispatch event.
+The `snapshot` operation also returns `wallet=null`: the older wallet-status RPC
+reveals a new address in memory, so this observer no longer calls it.
+
+Required fork producers are small read-only getters at the owning daemon:
+
+- A wallet inventory under its existing wallet guard, without address reveal or
+  secret export. Return the public descriptor and identity, last synchronized
+  canonical tip, minimum trusted confirmations, every confirmed/unconfirmed
+  outpoint with value/script/child index, maturity and active lock status.
+  Identify which confirmed unlocked funds the required signer can actually use.
+- A loaded runtime config identity and effective enforced transaction ceilings
+  for rounds, pool, quiet sweeps/direct payout, claims, progression and bumps.
+  Report an unimplemented limit as unavailable. Include declared ordinary and
+  urgent exposure/budget caps and actual remaining consumption; a file on disk
+  does not prove these facts.
+- Public full-owned channel balances, reserves/in-flight ownership and selected
+  route readiness from the actual owning Lightning node. Known node database
+  keys alone do not establish positive usable liquidity.
+- Resolved logical obligations and complete physical backing membership,
+  including delegated and internal-Lightning arbitration and pending carriers.
+  Fresh controlled treasury membership must cover every customer/forwarder;
+  otherwise mixed backing requires explicit attribution before conservation.
+
+Missing, truncated or stale producers hold dispatch. This bridge does not
+introduce an administrative command interface or a second dispatcher.

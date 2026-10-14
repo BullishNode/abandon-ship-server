@@ -4,17 +4,39 @@
 No arbitrary shell/SQL/path/RPC names accepted. This bridge has no client seed or
 mailbox key. Independent chain verification is performed on the simulator host.
 """
-import datetime,json,os,re,selectors,subprocess,sys,time,tomllib
+import datetime,hashlib,json,os,re,selectors,subprocess,sys,time,tomllib
+from decimal import Decimal
 from pathlib import Path
 DEPLOY=Path('/home/ubuntu/abandon-signet-fallback/deploy')
 CONTAINER='abandon-signet-fallback-fb-captaind-1'
 MAX_BYTES=2*1024*1024
 DESCRIPTOR=Path(__file__).with_name('rounds-wallet-descriptor.json')
+WALLET_DECLARATIONS=Path(__file__).with_name('treasury-wallet-declarations.json')
+FINANCIAL_ROW_LIMIT=2000
+FINANCIAL_TABLES={'coins','pending_boards','links','records','pool','lightning_nodes',
+    'htlcs','receives','payments','participations','participation_inputs','participation_outputs'}
+READ_DEADLINE=None
 
 def run(argv):
-    result=subprocess.run(argv,cwd=DEPLOY,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=20,check=True)
-    if len(result.stdout)>MAX_BYTES:raise ValueError('bridge output bound exceeded')
-    return result.stdout.decode()
+    remaining=20 if READ_DEADLINE is None else min(20,READ_DEADLINE-time.monotonic())
+    if remaining<=0:raise ValueError('financial observation deadline exceeded')
+    deadline=time.monotonic()+remaining;data=bytearray()
+    with subprocess.Popen(argv,cwd=DEPLOY,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL) as child:
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(child.stdout,selectors.EVENT_READ)
+                while True:
+                    remaining=deadline-time.monotonic()
+                    if remaining<=0 or not selector.select(remaining):raise ValueError('bridge deadline exceeded')
+                    chunk=os.read(child.stdout.fileno(),min(4096,MAX_BYTES+1-len(data)))
+                    if not chunk:break
+                    data.extend(chunk)
+                    if len(data)>MAX_BYTES:raise ValueError('bridge output bound exceeded')
+            child.wait(timeout=max(0.001,deadline-time.monotonic()))
+            if child.returncode!=0:raise subprocess.CalledProcessError(child.returncode,argv)
+        finally:
+            if child.poll() is None:child.kill();child.wait(timeout=5)
+    return data.decode()
 
 def ops(*args):return run([str(DEPLOY/'fallback/ops.sh'),*args])
 
@@ -22,6 +44,9 @@ def request(raw):
     if len(raw)>4096:raise ValueError('request bound exceeded')
     value=json.loads(raw)
     if not isinstance(value,dict):raise ValueError('invalid bridge request')
+    if value.get('kind') in {'financial_readiness','claimant_inventory'}:
+        if set(value)!={'kind'}:raise ValueError('financial operation takes no arguments')
+        return value['kind'],None
     if value.get('kind')=='rounds_descriptor':
         if set(value)!={'kind'}:raise ValueError('descriptor takes no arguments')
         return 'rounds_descriptor',None
@@ -118,7 +143,143 @@ def page(kind,after):
     return {'kind':kind,'fallback_protocol':3,'rows':rows,'next':rows[-1][field] if more else None,'inventory_consistent':False,
         'validation_scope':'trusted server claims; independently verify chain, backing, signatures and rightful ownership'}
 
+def claimant_sql():
+    # Complete bounded candidate tables in ONE snapshot, including spent logical
+    # ancestors whose physical backing remains. These are not summed liabilities:
+    # delegated predecessors/replacements and internal HTLCs need arbitration.
+    tables={
+        'coins':("vtxo", "vtxo_id", "vtxo_id,amount,expiry,spend_state,policy_type,encode(policy,'hex') AS policy,anchor_point,vtxo_txid,oor_spent_txid,spent_in_round,offboarded_in,frontier_at,confirmed_height", "onchain_spent_txid IS NULL"),
+        'pending_boards':("pending_board", "vtxo_id", "vtxo_id,expiry,encode(vtxo,'hex') AS signed_vtxo", "true"),
+        'links':("key_link", "user_pubkey", "encode(user_pubkey,'hex') AS user_pubkey,encode(mailbox_pk,'hex') AS mailbox_pk,child_index", "true"),
+        'records':("fallback_record", "mailbox_pk", "encode(mailbox_pk,'hex') AS mailbox_pk,encode(spk,'hex') AS spk,encode(account_xpub,'hex') AS account_xpub,encode(mailbox_sig,'hex') AS mailbox_sig,encode(account_sig,'hex') AS account_sig", "true"),
+        'pool':("vtxo_pool", "id", "id,vtxo_id,expiry_height,amount", "spent_at IS NULL"),
+        'lightning_nodes':("lightning_node", "id", "id,encode(pubkey,'hex') AS pubkey", "true"),
+        'htlcs':("htlc_vtxo h", "h.id", "h.id,h.payment_hash,h.htlc_expiry,h.direction,h.offchain_resolution,h.chain_resolution,h.chain_resolution_height,EXISTS (SELECT 1 FROM htlc_settlement s WHERE s.payment_hash=h.payment_hash) AS collection_recorded", "EXISTS (SELECT 1 FROM vtxo v WHERE v.id=h.id AND v.onchain_spent_txid IS NULL)"),
+        'receives':("lightning_htlc_subscription s", "s.id", "s.id,s.lightning_node_id,s.payment_hash,s.status,s.lowest_incoming_htlc_expiry,s.accepted_at,s.final_amount_msat,s.receiver_mailbox_id", "s.status NOT IN ('settled','canceled') OR EXISTS (SELECT 1 FROM vtxo v WHERE v.lightning_htlc_subscription_id=s.id AND v.onchain_spent_txid IS NULL)"),
+        'payments':("lightning_payment_attempt p", "p.id", "p.id,p.lightning_node_id,p.payment_hash,p.status,p.amount_msat,p.final_amount_msat,p.sender_mailbox_id,p.lightning_htlc_subscription_id,p.block_height,p.user_fee_sat,p.invoice_expires_at", "p.status NOT IN ('succeeded','failed') OR EXISTS (SELECT 1 FROM lightning_payment_attempt_htlc_vtxo a JOIN vtxo v ON v.vtxo_id=a.vtxo_id WHERE a.lightning_payment_attempt_id=p.id AND v.onchain_spent_txid IS NULL)"),
+        'participations':("round_participation p", "p.id", "p.id,p.round_id,p.created_at,p.forfeited_at,p.scheduled_height,(p.unlock_preimage IS NOT NULL) AS unlock_available", "p.forfeited_at IS NULL OR EXISTS (SELECT 1 FROM vtxo v WHERE v.spent_in_round=p.id AND v.onchain_spent_txid IS NULL)"),
+        'participation_inputs':("round_part_input i", "i.participation_id,i.vtxo_id", "i.participation_id,i.vtxo_id,(i.signed_forfeit_tx IS NOT NULL) AS forfeit_signed", "EXISTS (SELECT 1 FROM round_participation p WHERE p.id=i.participation_id AND (p.forfeited_at IS NULL OR EXISTS (SELECT 1 FROM vtxo v WHERE v.spent_in_round=p.id AND v.onchain_spent_txid IS NULL)))"),
+        'participation_outputs':("round_part_output o", "o.participation_id,o.policy,o.amount", "o.participation_id,encode(o.policy,'hex') AS policy,o.amount,o.unblinded_mailbox_id", "EXISTS (SELECT 1 FROM round_participation p WHERE p.id=o.participation_id AND (p.forfeited_at IS NULL OR EXISTS (SELECT 1 FROM vtxo v WHERE v.spent_in_round=p.id AND v.onchain_spent_txid IS NULL)))"),
+    }
+    fields=[]
+    for name,(table,key,columns,where) in tables.items():
+        fields.append("'"+name+"',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT "+columns+" FROM "+table+" WHERE "+where+" ORDER BY "+key+" LIMIT "+str(FINANCIAL_ROW_LIMIT+1)+") q)")
+    return "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='8s'; SELECT jsonb_build_object("+','.join(fields)+"); COMMIT;"
+
+def claimant_inventory():
+    lines=[line for line in ops('sql',claimant_sql()).splitlines() if line.startswith('{')]
+    if len(lines)!=1:raise ValueError('invalid financial database response')
+    result=json.loads(lines[0])
+    if not isinstance(result,dict) or set(result)!=FINANCIAL_TABLES or any(not isinstance(rows,list) for rows in result.values()):
+        raise ValueError('invalid financial inventory shape')
+    truncated=[name for name,rows in result.items() if len(rows)>FINANCIAL_ROW_LIMIT]
+    if any(len(rows)>FINANCIAL_ROW_LIMIT+1 for rows in result.values()):raise ValueError('financial row bound exceeded')
+    return {'kind':'claimant_inventory','fallback_protocol':3,
+        'rows':{name:rows[:FINANCIAL_ROW_LIMIT] for name,rows in result.items()},
+        'row_limit_per_table':FINANCIAL_ROW_LIMIT,'truncated_tables':sorted(truncated),
+        'inventory_consistent':True,'candidate_tables_complete':not truncated,
+        'complete':False,'liability_accounting_complete':False,
+        'validation_scope':'one database candidate snapshot, NOT a resolved claimant ledger or physical asset inventory; decode policies to exclude padding; independently arbitrate predecessors, HTLCs and backing membership'}
+
+def fee_rate_sat_kvb(value):
+    if value is None:return None
+    if not isinstance(value,str):raise ValueError('explicit fee rate unit required')
+    match=re.fullmatch(r'([0-9]+(?:\.[0-9]+)?)\s*sat/(kvb|vb)',value)
+    if not match:raise ValueError('unsupported fee rate unit')
+    number=Decimal(match[1])*(1000 if match[2]=='vb' else 1)
+    if number!=number.to_integral_value() or not 0<number<=10**9:raise ValueError('fee rate out of bound')
+    return int(number)
+
+def disk_financial_config(service):
+    path=DEPLOY/'state/signet-fallback'/f'{service}.toml'
+    with path.open('rb') as stream:raw=stream.read(65537)
+    if len(raw)>65536:raise ValueError('config file bound exceeded')
+    cfg=tomllib.loads(raw.decode());est=cfg.get('fee_estimator',{})
+    return {'sha256':hashlib.sha256(raw).hexdigest(),
+        'network':cfg.get('network'),'vtxo_lifetime':cfg.get('vtxo_lifetime'),
+        'min_trusted_confs':cfg.get('min_trusted_confs'),'round_interval':cfg.get('round_interval'),
+        'estimator_max_fee_rate_sat_kvb':fee_rate_sat_kvb(est.get('max_fee_rate')),
+        'estimator_fallback_fee_rates_sat_kvb':{name:fee_rate_sat_kvb(est.get('fallback_fee_rate_'+name)) for name in ('fast','regular','slow')},
+        'watchman_incremental_relay_fee_sat_kvb':fee_rate_sat_kvb(cfg.get('watchman',{}).get('incremental_relay_fee')),
+        'runtime_loaded_identity_verified':False,
+        'validation_scope':'allowlisted disk configuration only; defaults, command overrides, loaded runtime identity and transaction-path ceilings are not inferred'}
+
+def public_wallet_declarations(genesis):
+    if not WALLET_DECLARATIONS.exists():return {'available':False,'verified':False,'wallets_declared_complete':False,'wallets':[]}
+    with WALLET_DECLARATIONS.open('rb') as stream:raw=stream.read(65537)
+    if len(raw)>65536:raise ValueError('wallet declaration bound exceeded')
+    declaration=json.loads(raw)
+    if set(declaration)!={'network','genesis','wallets'} or declaration['network']!='signet' or declaration['genesis']!=genesis:
+        raise ValueError('wallet declaration network mismatch')
+    wallets=declaration['wallets']
+    if not isinstance(wallets,list) or not 1<=len(wallets)<=2:raise ValueError('wallet declaration bound')
+    seen=set();member_ids=set();identities=set();declared_descriptors=set()
+    for wallet in wallets:
+        if set(wallet)!={'member_id','wallet_kind','identity','descriptors'} or wallet['wallet_kind'] not in {'rounds','watchman'} or wallet['wallet_kind'] in seen:
+            raise ValueError('invalid public wallet identity')
+        seen.add(wallet['wallet_kind'])
+        if any(not isinstance(wallet[key],str) or not re.fullmatch(r'[a-zA-Z0-9:_-]{1,128}',wallet[key]) for key in ('member_id','identity')):
+            raise ValueError('invalid public wallet identifier')
+        if wallet['member_id'] in member_ids or wallet['identity'] in identities:raise ValueError('duplicate public wallet identity')
+        member_ids.add(wallet['member_id']);identities.add(wallet['identity'])
+        descriptors=wallet['descriptors']
+        if not isinstance(descriptors,list) or not 1<=len(descriptors)<=2:raise ValueError('descriptor bound')
+        for descriptor in descriptors:
+            # Refuse private descriptors BEFORE even the local Core RPC.
+            if not isinstance(descriptor,str) or len(descriptor)>1024 or not re.fullmatch(r'[a-zA-Z0-9\[\]/(),#*<>;\x27]+',descriptor):
+                raise ValueError('invalid public descriptor characters')
+            if re.search(r'xprv|tprv|(?:^|[^1-9A-HJ-NP-Za-km-z])[59cKL][1-9A-HJ-NP-Za-km-z]{50,51}(?:[^1-9A-HJ-NP-Za-km-z]|$)',descriptor):
+                raise ValueError('private descriptor refused')
+            if descriptor in declared_descriptors:raise ValueError('same public descriptor counted twice')
+            declared_descriptors.add(descriptor)
+            details=json.loads(ops('cli','getdescriptorinfo',descriptor))
+            if details.get('hasprivatekeys') is not False or details.get('descriptor')!=descriptor or details.get('isrange') is not True:
+                raise ValueError('canonical public ranged descriptor required')
+    return {'available':True,'verified':True,'wallets_declared_complete':seen=={'rounds','watchman'},'wallets':wallets,
+        'validation_scope':'canonical public descriptor syntax/network declaration verified; daemon ownership and current signer inventory still require independent runtime proof'}
+
+def _financial_readiness():
+    started=time.time();before=json.loads(ops('cli','getblockchaininfo'))
+    genesis=ops('cli','getblockhash','0').strip().strip('"')
+    if before.get('chain')!='signet':raise ValueError('financial observer is signet only')
+    configs={service:disk_financial_config(service) for service in ('captaind','watchmand')}
+    images={}
+    for service in ('captaind','watchmand'):
+        container='abandon-signet-fallback-fb-'+service+'-1'
+        images[service]=json.loads(run(['sudo','-n','docker','inspect','--format',
+            '{"image_digest":{{json .Image}},"status":{{json .State.Status}},"restarts":{{json .RestartCount}}}',container]))
+    declarations=public_wallet_declarations(genesis);candidates=claimant_inventory()
+    ending=json.loads(ops('cli','getblockchaininfo'))
+    stable=before['bestblockhash']==ending['bestblockhash']
+    gaps=['runtime_wallet_inventory_with_canonical_positions_and_active_input_locks',
+        'deployed_product_commit_and_sdk_driver_schema_pins',
+        'resolved_claimant_and_physical_backing_membership',
+        'loaded_runtime_configuration_identity_and_enforced_path_caps',
+        'epoch_budget_and_inflight_capital_consumption',
+        'lightning_full_owned_channel_balances_and_selected_route_readiness']
+    if not declarations.get('wallets_declared_complete'):gaps.append('public_rounds_and_watchman_wallet_declarations')
+    if candidates['truncated_tables']:gaps.append('bounded_candidate_inventory_truncated')
+    if not stable:gaps.append('chain_tip_changed')
+    if ending.get('initialblockdownload') is not False:gaps.append('chain_not_synchronized')
+    return {'kind':'financial_readiness','observed_at':started,'completed_at':time.time(),
+        'network':ending['chain'],'genesis':genesis,'height':ending['blocks'],'tip_hash':ending['bestblockhash'],
+        'stable_tip':stable,'images':images,'disk_config':configs,'wallet_declarations':declarations,
+        'candidate_inventory':candidates,
+        'runtime_wallet_inventory':None,'effective_fee_ceilings_sat_kvb':None,
+        'capital_exposure_msat':None,'available_fee_funding_msat':None,
+        'budget_remaining_msat':None,'pool_ready':None,'channel_route_ready':None,
+        'complete':False,'qualified':False,'gaps':gaps,
+        'validation_scope':'bounded original read-only facts; missing monetary producers hold dispatch; disk estimator ceilings are not effective transaction-path limits'}
+
+def financial_readiness():
+    global READ_DEADLINE
+    previous=READ_DEADLINE;READ_DEADLINE=time.monotonic()+20
+    try:return _financial_readiness()
+    finally:READ_DEADLINE=previous
+
 def collect(kind,after):
+    if kind=='claimant_inventory':return claimant_inventory()
+    if kind=='financial_readiness':return financial_readiness()
     if kind=='logs':return logs(after)
     if kind=='rounds_descriptor':return {'kind':kind,'declaration':json.loads(DESCRIPTOR.read_text())}
     if kind=='binding_check':
@@ -135,13 +296,14 @@ def collect(kind,after):
     if kind!='snapshot':return page(kind,after)
     before=json.loads(ops('cli','getblockchaininfo'))
     image=json.loads(run(['sudo','-n','docker','inspect','--format','{"image_digest":{{json .Image}},"status":{{json .State.Status}},"restarts":{{json .RestartCount}}}',CONTAINER]))
-    wallet=json.loads(ops('capt','rpc','wallet'))
     cfg=tomllib.loads((DEPLOY/'state/signet-fallback/captaind.toml').read_text())
     ending=json.loads(ops('cli','getblockchaininfo'))
     return {'kind':kind,'observed_at':time.time(),'height':ending['blocks'],'tip_hash':ending['bestblockhash'],
         'network':ending['chain'],'genesis':ops('cli','getblockhash','0').strip().strip('"'),
         'stable_tip':before['bestblockhash']==ending['bestblockhash'],'initial_block_download':ending['initialblockdownload'],
-        'container':CONTAINER,'server_status':image,'wallet':wallet,
+        'container':CONTAINER,'server_status':image,'wallet':None,
+        'wallet_inventory_complete':False,
+        'wallet_scope':'not collected: legacy wallet-status RPC reveals an address; read-only runtime signer/lock inventory is required',
         'timings':{key:cfg.get('expiry_payout',{}).get(key) for key in ['enabled','min_payout_sat','grace_blocks','sweep_min_confs']},
         'lightning_configured':bool(cfg.get('cln_array')),'complete':False}
 
