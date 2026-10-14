@@ -68,6 +68,19 @@ class LogsTest(unittest.TestCase):
         self.assertEqual(4096, len(result['lines'][0]))
         self.assertFalse(result['complete'])
 
+    def test_signed_transaction_and_witness_fields_never_enter_public_log_trace(self):
+        payload=json.dumps({'message':'wallet signed transaction','txid':'a'*64,
+            'raw_tx':'0200000001'+'11'*32,'signed_tx':'0200000001'+'22'*32,
+            'details':{'txinwitness':['33'*32],'witness':'44'*32},'fee':1124})
+        result=self.capture('print('+repr(payload)+'); print("raw_tx: '+ '55'*32+'")',
+            {'kind':'logs','service':'watchmand'})
+        row=json.loads(result['lines'][0])
+        self.assertEqual('a'*64,row['txid']);self.assertEqual(1124,row['fee'])
+        self.assertEqual('[redacted]',row['raw_tx']);self.assertEqual('[redacted]',row['signed_tx'])
+        self.assertEqual('[redacted]',row['details']['txinwitness'])
+        self.assertEqual('[redacted]',row['details']['witness'])
+        self.assertEqual('[redacted sensitive text]',result['lines'][1])
+
 
 
 if __name__ == '__main__':

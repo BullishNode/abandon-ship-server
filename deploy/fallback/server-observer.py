@@ -101,7 +101,7 @@ def logs(value):
             if child.poll() is None:child.kill();child.wait(timeout=5)
     text=bytes(data[:value['max_bytes']]).decode(errors='replace')
     # Keep public event details, but remove named credentials and preimages.
-    sensitive=re.compile(r'(secret|password|rpc_pass|private[_ ]key|mailbox[_ ]key|preimage|mnemonic|authorization|credential)',re.I)
+    sensitive=re.compile(r'(secret|password|rpc_pass|private[_ ]key|mailbox[_ ]key|preimage|mnemonic|authorization|credential|raw[_ ]tx|signed[_ ]tx|witness)',re.I)
     def redact(item):
         if isinstance(item,dict):return {k:('[redacted]' if sensitive.search(k) else redact(v)) for k,v in item.items()}
         if isinstance(item,list):return [redact(v) for v in item]
