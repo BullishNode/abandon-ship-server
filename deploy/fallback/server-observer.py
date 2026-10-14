@@ -44,7 +44,7 @@ def request(raw):
     if len(raw)>4096:raise ValueError('request bound exceeded')
     value=json.loads(raw)
     if not isinstance(value,dict):raise ValueError('invalid bridge request')
-    if value.get('kind') in {'financial_readiness','claimant_inventory'}:
+    if value.get('kind') in {'financial_readiness','claimant_inventory','direct_journal'}:
         if set(value)!={'kind'}:raise ValueError('financial operation takes no arguments')
         return value['kind'],None
     if value.get('kind')=='rounds_descriptor':
@@ -180,6 +180,65 @@ def claimant_inventory():
         'inventory_consistent':True,'candidate_tables_complete':not truncated,
         'complete':False,'liability_accounting_complete':False,
         'validation_scope':'one database candidate snapshot, NOT a resolved claimant ledger or physical asset inventory; decode policies to exclude padding; independently arbitrate predecessors, HTLCs and backing membership'}
+
+# Fixed public projections only. In particular, signed_tx, source_evidence and
+# encoded VTXOs can contain claim witnesses or preimages and are never exported.
+DIRECT_JOURNAL_COLUMNS={
+    'allocations':('expiry_allocation','id',
+        "id,freeze_set,encode(owner_pubkey,'hex') AS owner_pubkey,encode(spk,'hex') AS spk,disposition,gross_sat,fee_sat,payout_sat,forfeited_sat,source,retirement_ids,frozen_at"),
+    'carriers':('expiry_carrier','generation',
+        'txid,generation,backing_ids,fee_inputs,miner_fee_sat,funding_subsidy_sat,created_at,confirmed_height,confirmed_block'),
+    'mappings':('expiry_carrier_allocation','txid,allocation_id','txid,allocation_id,vout'),
+    'records':('fallback_record','mailbox_pk',
+        "encode(mailbox_pk,'hex') AS mailbox_pk,encode(spk,'hex') AS spk,encode(account_xpub,'hex') AS account_xpub,encode(mailbox_sig,'hex') AS mailbox_sig,encode(account_sig,'hex') AS account_sig"),
+    'links':('key_link','user_pubkey',
+        "encode(user_pubkey,'hex') AS user_pubkey,encode(mailbox_pk,'hex') AS mailbox_pk,child_index"),
+}
+DIRECT_JOURNAL_FIELDS={
+    'allocations':{'id','freeze_set','owner_pubkey','spk','disposition','gross_sat','fee_sat','payout_sat','forfeited_sat','source','retirement_ids','frozen_at'},
+    'carriers':{'txid','generation','backing_ids','fee_inputs','miner_fee_sat','funding_subsidy_sat','created_at','confirmed_height','confirmed_block'},
+    'mappings':{'txid','allocation_id','vout'},
+    'records':{'mailbox_pk','spk','account_xpub','mailbox_sig','account_sig'},
+    'links':{'user_pubkey','mailbox_pk','child_index'},
+}
+
+def direct_journal_sql():
+    fields=[]
+    for name,(table,key,columns) in DIRECT_JOURNAL_COLUMNS.items():
+        fields.append("'"+name+"',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT "+columns+
+            " FROM "+table+" ORDER BY "+key+" LIMIT "+str(FINANCIAL_ROW_LIMIT+1)+") q)")
+    return ("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='8s'; "
+        "SELECT jsonb_build_object('snapshot',pg_current_snapshot()::text,'observed_at',transaction_timestamp(),"
+        "'rows',jsonb_build_object("+','.join(fields)+")); COMMIT;")
+
+def direct_journal():
+    lines=[line for line in ops('sql',direct_journal_sql()).splitlines() if line.startswith('{')]
+    if len(lines)!=1:raise ValueError('invalid direct journal database response')
+    frame=json.loads(lines[0])
+    if not isinstance(frame,dict) or set(frame)!={'snapshot','observed_at','rows'}:
+        raise ValueError('invalid direct journal frame')
+    rows=frame['rows']
+    if not isinstance(rows,dict) or set(rows)!=set(DIRECT_JOURNAL_COLUMNS):
+        raise ValueError('incomplete direct journal tables')
+    # A partial page is never delivered as an apparently complete journal. A
+    # larger deployment needs a separately qualified consistent paging source.
+    for name,items in rows.items():
+        if not isinstance(items,list) or len(items)>FINANCIAL_ROW_LIMIT:
+            raise ValueError('complete direct journal exceeds row budget')
+        for item in items:
+            if not isinstance(item,dict) or set(item)!=DIRECT_JOURNAL_FIELDS[name]:
+                raise ValueError('unexpected direct journal fields')
+            if name=='carriers':
+                inputs=item['fee_inputs']
+                if not isinstance(inputs,list) or any(not isinstance(i,dict) or set(i)!={'outpoint','value_sat','script_pubkey'} for i in inputs):
+                    raise ValueError('unexpected direct fee input fields')
+    result={'kind':'direct_journal','schema_version':1,'fallback_protocol':3,**frame,
+        'row_limit_per_table':FINANCIAL_ROW_LIMIT,'journal_complete':True,'inventory_consistent':True,
+        'complete':False,'qualified':False,
+        'validation_scope':'one complete bounded read-only journal snapshot; frozen allocations and claimed confirmation fields are not payments; independently verify ownership, all carrier versions, active-chain spends, outputs, fees and treasury'}
+    if len(json.dumps(result,allow_nan=False).encode())>MAX_BYTES:
+        raise ValueError('complete direct journal exceeds byte budget')
+    return result
 
 def fee_rate_sat_kvb(value):
     if value is None:return None
@@ -397,6 +456,7 @@ def financial_readiness():
     finally:READ_DEADLINE=previous
 
 def collect(kind,after):
+    if kind=='direct_journal':return direct_journal()
     if kind=='claimant_inventory':return claimant_inventory()
     if kind=='financial_readiness':return financial_readiness()
     if kind=='logs':return logs(after)
