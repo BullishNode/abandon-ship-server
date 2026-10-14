@@ -15,6 +15,26 @@ def frame():
 
 
 class DirectJournalTest(unittest.TestCase):
+    def test_binding_inventory_is_scoped_to_allocated_owners(self):
+        sql=bridge.direct_journal_sql()
+        self.assertIn('expiry_allocation a WHERE a.owner_pubkey=key_link.user_pubkey',sql)
+        self.assertIn('a.owner_pubkey=l.user_pubkey WHERE l.mailbox_pk=fallback_record.mailbox_pk',sql)
+        with patch.object(bridge,'ops',return_value=json.dumps(frame())):
+            result=bridge.direct_journal()
+        self.assertEqual('owners_referenced_by_allocations',result['binding_scope'])
+
+    def test_older_inventory_operations_do_not_export_encoded_claim_witnesses(self):
+        for kind in ('coins','pending','nursery'):
+            with self.subTest(kind=kind),patch.object(bridge,'ops',return_value='[]') as operation:
+                bridge.page(kind,'')
+                sql=operation.call_args.args[1]
+                self.assertNotIn('signed_vtxo',sql)
+                self.assertNotIn('raw_tx',sql)
+                self.assertNotIn('encode(v.vtxo',sql)
+                self.assertNotIn('encode(p.vtxo',sql)
+                self.assertNotIn('encode(n.tx',sql)
+        self.assertNotIn('signed_vtxo',bridge.claimant_sql())
+
     def test_fixed_operation_refuses_selected_query_and_cursor(self):
         self.assertEqual(('direct_journal',None),bridge.request(b'{"kind":"direct_journal"}'))
         for field,value in [('sql','SELECT 1'),('after','txid'),('path','/data/seed'),('limit',10000)]:

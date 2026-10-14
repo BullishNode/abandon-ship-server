@@ -81,6 +81,13 @@ class LogsTest(unittest.TestCase):
         self.assertEqual('[redacted]',row['details']['witness'])
         self.assertEqual('[redacted sensitive text]',result['lines'][1])
 
+    def test_public_witness_failure_reason_is_preserved(self):
+        payload=json.dumps({'message':'recovery witness validation failed','waiting':1})
+        result=self.capture('print('+repr(payload)+'); print("witness: '+'77'*32+'")',
+            {'kind':'logs','service':'watchmand'})
+        self.assertEqual('recovery witness validation failed',json.loads(result['lines'][0])['message'])
+        self.assertEqual('[redacted sensitive text]',result['lines'][1])
+
 
 
 if __name__ == '__main__':

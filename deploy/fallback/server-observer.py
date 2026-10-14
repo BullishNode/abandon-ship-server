@@ -102,10 +102,11 @@ def logs(value):
     text=bytes(data[:value['max_bytes']]).decode(errors='replace')
     # Keep public event details, but remove named credentials and preimages.
     sensitive=re.compile(r'(secret|password|rpc_pass|private[_ ]key|mailbox[_ ]key|preimage|mnemonic|authorization|credential|raw[_ ]tx|signed[_ ]tx|witness)',re.I)
+    sensitive_text=re.compile(r'(secret|password|rpc_pass|private[_ ]key|mailbox[_ ]key|preimage|mnemonic|authorization|credential|raw[_ ]tx|signed[_ ]tx|txinwitness|\bwitness\s*[:=])',re.I)
     def redact(item):
         if isinstance(item,dict):return {k:('[redacted]' if sensitive.search(k) else redact(v)) for k,v in item.items()}
         if isinstance(item,list):return [redact(v) for v in item]
-        if isinstance(item,str):return '[redacted sensitive text]' if sensitive.search(item) else item
+        if isinstance(item,str):return '[redacted sensitive text]' if sensitive_text.search(item) else item
         return item
     lines=[]
     for line in text.splitlines():
@@ -127,11 +128,11 @@ def page(kind,after):
          "(SELECT jsonb_build_object('payment_hash',h.payment_hash,'direction',h.direction,'htlc_expiry',h.htlc_expiry,'offchain_resolution',h.offchain_resolution,'chain_resolution',h.chain_resolution, "
          "'collection_recorded',EXISTS (SELECT 1 FROM htlc_settlement z WHERE z.payment_hash=h.payment_hash AND z.created_at<=s.created_at), "
          "'subscription_settled',EXISTS (SELECT 1 FROM lightning_htlc_subscription r WHERE r.payment_hash=h.payment_hash AND r.status='settled')) FROM htlc_vtxo h JOIN vtxo v ON v.id=h.id WHERE v.vtxo_id=s.id) AS htlc"),
-      'coins':("v.vtxo_id","vtxo v","v.vtxo_id,v.id,v.expiry,v.spend_state,v.policy_type,encode(v.vtxo,'hex') AS signed_vtxo,v.onchain_spent_txid,v.onchain_spent_height,v.confirmed_height,v.oor_spent_txid,v.spent_in_round,v.offboarded_in"),
-      'pending':("p.vtxo_id","pending_board p","p.vtxo_id,p.id,p.expiry,encode(p.vtxo,'hex') AS signed_vtxo"),
+      'coins':("v.vtxo_id","vtxo v","v.vtxo_id,v.id,v.amount,v.expiry,v.spend_state,v.policy_type,encode(v.policy,'hex') AS policy,v.anchor_point,v.onchain_spent_txid,v.onchain_spent_height,v.confirmed_height,v.oor_spent_txid,v.spent_in_round,v.offboarded_in"),
+      'pending':("p.vtxo_id","pending_board p","p.vtxo_id,p.id,p.expiry"),
       'links':("encode(l.user_pubkey,'hex')","key_link l","encode(l.user_pubkey,'hex') AS user_pubkey,encode(l.mailbox_pk,'hex') AS mailbox_pk,l.child_index"),
       'records':("encode(r.mailbox_pk,'hex')","fallback_record r","encode(r.mailbox_pk,'hex') AS mailbox_pk,encode(r.spk,'hex') AS spk,encode(r.account_xpub,'hex') AS account_xpub,encode(r.mailbox_sig,'hex') AS mailbox_sig,encode(r.account_sig,'hex') AS account_sig"),
-      'nursery':("n.txid","nursery_tx n","n.txid,encode(n.tx,'hex') AS raw_tx,n.kind,n.confirmed_at_height,n.abandoned_at")}
+      'nursery':("n.txid","nursery_tx n","n.txid,n.kind,n.confirmed_at_height,n.abandoned_at")}
     key,table,columns=tables[kind]
     # Cursor whitelist contains no quotes/operators. All table/column names fixed.
     sql=f"BEGIN READ ONLY; SET LOCAL statement_timeout='8s'; SELECT coalesce(jsonb_agg(t),'[]'::jsonb) FROM (SELECT {columns} FROM {table} WHERE {key} > '{after}' ORDER BY {key} LIMIT 101) t; COMMIT;"
@@ -149,7 +150,7 @@ def claimant_sql():
     # delegated predecessors/replacements and internal HTLCs need arbitration.
     tables={
         'coins':("vtxo", "vtxo_id", "vtxo_id,amount,expiry,spend_state,policy_type,encode(policy,'hex') AS policy,anchor_point,vtxo_txid,oor_spent_txid,spent_in_round,offboarded_in,frontier_at,confirmed_height", "onchain_spent_txid IS NULL"),
-        'pending_boards':("pending_board", "vtxo_id", "vtxo_id,expiry,encode(vtxo,'hex') AS signed_vtxo", "true"),
+        'pending_boards':("pending_board", "vtxo_id", "vtxo_id,expiry", "true"),
         'links':("key_link", "user_pubkey", "encode(user_pubkey,'hex') AS user_pubkey,encode(mailbox_pk,'hex') AS mailbox_pk,child_index", "true"),
         'records':("fallback_record", "mailbox_pk", "encode(mailbox_pk,'hex') AS mailbox_pk,encode(spk,'hex') AS spk,encode(account_xpub,'hex') AS account_xpub,encode(mailbox_sig,'hex') AS mailbox_sig,encode(account_sig,'hex') AS account_sig", "true"),
         'pool':("vtxo_pool", "id", "id,vtxo_id,expiry_height,amount", "spent_at IS NULL"),
@@ -205,8 +206,16 @@ DIRECT_JOURNAL_FIELDS={
 def direct_journal_sql():
     fields=[]
     for name,(table,key,columns) in DIRECT_JOURNAL_COLUMNS.items():
+        # Lookahead keys of unrelated active wallets do not belong to this
+        # settlement journal. Keep every allocation/carrier generation, and
+        # authenticate precisely the owners referenced by those allocations.
+        where=''
+        if name=='links':
+            where=' WHERE EXISTS (SELECT 1 FROM expiry_allocation a WHERE a.owner_pubkey=key_link.user_pubkey)'
+        elif name=='records':
+            where=' WHERE EXISTS (SELECT 1 FROM key_link l JOIN expiry_allocation a ON a.owner_pubkey=l.user_pubkey WHERE l.mailbox_pk=fallback_record.mailbox_pk)'
         fields.append("'"+name+"',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT "+columns+
-            " FROM "+table+" ORDER BY "+key+" LIMIT "+str(FINANCIAL_ROW_LIMIT+1)+") q)")
+            " FROM "+table+where+" ORDER BY "+key+" LIMIT "+str(FINANCIAL_ROW_LIMIT+1)+") q)")
     return ("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='8s'; "
         "SELECT jsonb_build_object('snapshot',pg_current_snapshot()::text,'observed_at',transaction_timestamp(),"
         "'rows',jsonb_build_object("+','.join(fields)+")); COMMIT;")
@@ -233,6 +242,7 @@ def direct_journal():
                 if not isinstance(inputs,list) or any(not isinstance(i,dict) or set(i)!={'outpoint','value_sat','script_pubkey'} for i in inputs):
                     raise ValueError('unexpected direct fee input fields')
     result={'kind':'direct_journal','schema_version':1,'fallback_protocol':3,**frame,
+        'binding_scope':'owners_referenced_by_allocations',
         'row_limit_per_table':FINANCIAL_ROW_LIMIT,'journal_complete':True,'inventory_consistent':True,
         'complete':False,'qualified':False,
         'validation_scope':'one complete bounded read-only journal snapshot; frozen allocations and claimed confirmation fields are not payments; independently verify ownership, all carrier versions, active-chain spends, outputs, fees and treasury'}
