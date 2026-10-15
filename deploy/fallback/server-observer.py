@@ -4,7 +4,7 @@
 No arbitrary shell/SQL/path/RPC names accepted. This bridge has no client seed or
 mailbox key. Independent chain verification is performed on the simulator host.
 """
-import datetime,hashlib,json,os,re,selectors,subprocess,sys,time,tomllib
+import datetime,hashlib,json,os,re,selectors,stat,subprocess,sys,time,tomllib
 from decimal import Decimal
 from pathlib import Path
 DEPLOY=Path('/home/ubuntu/abandon-signet-fallback/deploy')
@@ -314,18 +314,51 @@ def fee_rate_sat_kvb(value):
     return int(number)
 
 def disk_financial_config(service):
-    path=DEPLOY/'state/signet-fallback'/f'{service}.toml'
-    with path.open('rb') as stream:raw=stream.read(65537)
-    if len(raw)>65536:raise ValueError('config file bound exceeded')
+    sources=[item for item in WALLET_SOURCES.values() if item[0]==service]
+    if len(sources)!=1:raise ValueError('unsupported config service')
+    container=sources[0][1];destination=f'/config/{service}.toml'
+    mounts=json.loads(run(['sudo','-n','docker','inspect','--format','{{json .Mounts}}',container]))
+    if not isinstance(mounts,list) or len(mounts)>32 or any(not isinstance(m,dict) for m in mounts):
+        raise ValueError('bounded daemon mount inventory required')
+    matches=[m for m in mounts if m.get('Destination')==destination]
+    if len(matches)!=1 or matches[0].get('Type')!='bind' or matches[0].get('RW') is not False:
+        raise ValueError('one read-only daemon config bind mount required')
+    source=matches[0].get('Source')
+    if not isinstance(source,str) or len(source)>4096:
+        raise ValueError('bounded config mount source required')
+    path=Path(source);parent=DEPLOY.parent
+    if (not path.is_absolute() or str(path)!=source or '..' in path.parts
+            or not parent.is_absolute() or path==parent or not path.is_relative_to(parent)):
+        raise ValueError('config mount must be canonical under the owned deployment parent')
+    # Resolve every component through directory descriptors, without following
+    # symlinks. A string resolve/check followed by open would leave a race.
+    directory=os.open(path.anchor,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        for part in path.parts[1:-1]:
+            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory)
+            os.close(directory);directory=child
+        file=os.open(path.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+    finally:os.close(directory)
+    with os.fdopen(file,'rb') as stream:
+        before=os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size>65536:
+            raise ValueError('bounded regular config file required')
+        raw=stream.read(65537);after=os.fstat(stream.fileno())
+    if (len(raw)>65536 or (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)
+            !=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns)):
+        raise ValueError('config file changed or exceeded bound')
     cfg=tomllib.loads(raw.decode());est=cfg.get('fee_estimator',{})
     return {'sha256':hashlib.sha256(raw).hexdigest(),
+        'source':{'container':container,'mount_destination':destination,'mount_source':source,'read_only':True},
         'network':cfg.get('network'),'vtxo_lifetime':cfg.get('vtxo_lifetime'),
         'min_trusted_confs':cfg.get('min_trusted_confs'),'round_interval':cfg.get('round_interval'),
+        'timings':{key:cfg.get('expiry_payout',{}).get(key) for key in ('enabled','min_payout_sat','grace_blocks','sweep_min_confs')},
+        'lightning_configured':bool(cfg.get('cln_array')),
         'estimator_max_fee_rate_sat_kvb':fee_rate_sat_kvb(est.get('max_fee_rate')),
         'estimator_fallback_fee_rates_sat_kvb':{name:fee_rate_sat_kvb(est.get('fallback_fee_rate_'+name)) for name in ('fast','regular','slow')},
         'watchman_incremental_relay_fee_sat_kvb':fee_rate_sat_kvb(cfg.get('watchman',{}).get('incremental_relay_fee')),
         'runtime_loaded_identity_verified':False,
-        'validation_scope':'allowlisted disk configuration only; defaults, command overrides, loaded runtime identity and transaction-path ceilings are not inferred'}
+        'validation_scope':'allowlisted disk configuration from the actual read-only Docker mount only; defaults, command overrides, loaded runtime identity and transaction-path ceilings are not inferred'}
 
 def public_wallet_declarations(genesis):
     if not WALLET_DECLARATIONS.exists():return {'available':False,'verified':False,'wallets_declared_complete':False,'wallets':[]}
@@ -590,7 +623,7 @@ def collect(kind,after):
     if kind!='snapshot':return page(kind,after)
     before=json.loads(ops('cli','getblockchaininfo'))
     image=json.loads(run(['sudo','-n','docker','inspect','--format','{"image_digest":{{json .Image}},"status":{{json .State.Status}},"restarts":{{json .RestartCount}}}',CONTAINER]))
-    cfg=tomllib.loads((DEPLOY/'state/signet-fallback/captaind.toml').read_text())
+    cfg=disk_financial_config('captaind')
     ending=json.loads(ops('cli','getblockchaininfo'))
     return {'kind':kind,'observed_at':time.time(),'height':ending['blocks'],'tip_hash':ending['bestblockhash'],
         'network':ending['chain'],'genesis':ops('cli','getblockhash','0').strip().strip('"'),
@@ -598,8 +631,8 @@ def collect(kind,after):
         'container':CONTAINER,'server_status':image,'wallet':None,
         'wallet_inventory_complete':False,
         'wallet_scope':'not collected: legacy wallet-status RPC reveals an address; read-only runtime signer/lock inventory is required',
-        'timings':{key:cfg.get('expiry_payout',{}).get(key) for key in ['enabled','min_payout_sat','grace_blocks','sweep_min_confs']},
-        'lightning_configured':bool(cfg.get('cln_array')),'complete':False}
+        'timings':cfg['timings'],'disk_config':cfg,
+        'lightning_configured':cfg['lightning_configured'],'complete':False}
 
 def main():
     kind,after=request(sys.stdin.buffer.read(4097));result=collect(kind,after)
