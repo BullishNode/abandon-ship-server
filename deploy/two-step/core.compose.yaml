@@ -1,0 +1,31 @@
+# Isolated A Core bootstrap only. No wallet, Ark, Lightning or payout writers.
+name: two-step-signet-a-20261014
+services:
+  core:
+    image: bitcoin/bitcoin@sha256:a1d05be6939b5c85132a761d2b795f5b8a2612ce53782263da4939778e461792
+    restart: "no"
+    user: "1000:1000"
+    entrypoint: [bitcoind]
+    command: [-datadir=/data, -conf=/etc/bitcoin/bitcoin.conf]
+    volumes:
+      - /srv/two-step-core/bitcoin:/data
+      - ./config/bitcoin.conf:/etc/bitcoin/bitcoin.conf:ro
+    ports:
+      - "127.0.0.1:28332:38332"
+    networks: [core-private]
+    healthcheck:
+      test: [CMD-SHELL, "bitcoin-cli -datadir=/data -conf=/etc/bitcoin/bitcoin.conf getblockchaininfo >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+networks:
+  core-private:
+    name: two-step-signet-a-core-20261014
+    ipam:
+      config:
+        - subnet: "${A_CORE_PRIVATE_CIDR:?Set the dedicated Docker network CIDR}"

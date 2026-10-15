@@ -1,0 +1,19 @@
+# Official public signet; fresh independent chainstate and RPC cookie.
+signet=1
+server=1
+disablewallet=1
+txindex=1
+prune=0
+blockfilterindex=1
+coinstatsindex=1
+dbcache=1000
+maxconnections=32
+listen=0
+discover=0
+printtoconsole=1
+shrinkdebugfile=0
+[signet]
+rpcport=38332
+rpcbind=0.0.0.0
+rpcallowip=127.0.0.1
+rpcallowip=${A_CORE_PRIVATE_CIDR}
