@@ -1,0 +1,28 @@
+[Unit]
+Description=Track C qualified native watchmand
+After=network-online.target track-c-postgres.service track-c-bitcoind.service
+Requires=track-c-postgres.service track-c-bitcoind.service
+RequiresMountsFor=/srv/track-c-data/captaind
+[Service]
+Type=simple
+User=trackcserver
+Group=trackcserver
+UMask=0077
+Environment=TOKIO_WORKER_THREADS=2
+Environment=WATCHMAND_LOG=info
+ExecStartPre=+/opt/track-c/observer/prestart-capture.py watchmand
+ExecStart=/opt/track-c/runtime/watchmand --config /etc/track-c/watchmand.toml start
+Restart=no
+TimeoutStartSec=120
+TimeoutStopSec=120
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/track-c-data/captaind /run/track-c-startup
+MemoryMax=1G
+TasksMax=256
+LimitNOFILE=65536
+[Install]
+WantedBy=multi-user.target

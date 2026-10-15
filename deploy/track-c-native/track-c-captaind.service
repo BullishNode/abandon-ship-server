@@ -1,0 +1,28 @@
+[Unit]
+Description=Track C qualified native captaind
+After=network-online.target track-c-postgres.service track-c-bitcoind.service
+Requires=track-c-postgres.service track-c-bitcoind.service
+RequiresMountsFor=/srv/track-c-data/captaind
+[Service]
+Type=simple
+User=trackcserver
+Group=trackcserver
+UMask=0077
+Environment=TOKIO_WORKER_THREADS=2
+Environment=CAPTAIND_LOG=info
+ExecStartPre=+/opt/track-c/observer/prestart-capture.py captaind
+ExecStart=/opt/track-c/runtime/captaind --config /etc/track-c/captaind.toml start
+Restart=no
+TimeoutStartSec=120
+TimeoutStopSec=120
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/track-c-data/captaind /run/track-c-startup
+MemoryMax=2G
+TasksMax=256
+LimitNOFILE=65536
+[Install]
+WantedBy=multi-user.target
