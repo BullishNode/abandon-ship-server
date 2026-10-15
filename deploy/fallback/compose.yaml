@@ -38,7 +38,7 @@ services:
     depends_on:
       fb-postgres: {condition: service_healthy}
     healthcheck:
-      test: [CMD-SHELL, "captaind --config /config/captaind.toml rpc wallet >/dev/null"]
+      test: [CMD-SHELL, "captaind --config /config/captaind.toml rpc wallet-inventory >/dev/null"]
       interval: 10s
       retries: 60
 
