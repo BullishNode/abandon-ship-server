@@ -4,6 +4,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -f state/signet-fallback/secrets.env ] || { echo "run ./fallback/render.sh first" >&2; exit 1; }
+[ -f state/signet-fallback/active.compose.yaml ] || { echo "missing state/signet-fallback/active.compose.yaml" >&2; exit 1; }
 exec docker compose -p abandon-signet-fallback --project-directory . \
 	--env-file fallback/signet-fallback.env --env-file state/signet-fallback/secrets.env \
-	-f fallback/compose.yaml "$@"
+	-f fallback/compose.yaml -f state/signet-fallback/active.compose.yaml "$@"
