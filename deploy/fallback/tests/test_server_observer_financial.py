@@ -60,7 +60,9 @@ class FinancialBridgeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);state=root/'state/signet-fallback';state.mkdir(parents=True)
             (state/'watchmand.toml').write_text('network="signet"\n[fee_estimator]\nmax_fee_rate="2sat/vb"\nfallback_fee_rate_regular="1sat/vb"\n[watchman]\nincremental_relay_fee="100 sat/kvb"\n[bitcoind]\nrpc_pass="secret-value"\n')
-            with patch.object(bridge,'DEPLOY',root):result=bridge.disk_financial_config('watchmand')
+            mount=[{'Type':'bind','RW':False,'Destination':'/config/watchmand.toml','Source':str(state/'watchmand.toml')}]
+            with patch.object(bridge,'DEPLOY',root),patch.object(bridge,'run',return_value=json.dumps(mount)):
+                result=bridge.disk_financial_config('watchmand')
         self.assertNotIn('secret-value',json.dumps(result));self.assertNotIn('rpc_pass',json.dumps(result))
         self.assertEqual(2000,result['estimator_max_fee_rate_sat_kvb'])
         self.assertEqual(100,result['watchman_incremental_relay_fee_sat_kvb'])
@@ -121,7 +123,7 @@ class FinancialBridgeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);state=root/'state/signet-fallback';state.mkdir(parents=True)
             (state/'captaind.toml').write_text('network="signet"\n')
-            with patch.object(bridge,'DEPLOY',root),patch.object(bridge,'ops',side_effect=[json.dumps(chain),json.dumps(chain),GENESIS]) as operation,patch.object(bridge,'run',return_value='{"status":"running"}'):
+            with patch.object(bridge,'DEPLOY',root),patch.object(bridge,'disk_financial_config',return_value={'timings':{},'lightning_configured':False,'runtime_loaded_identity_verified':False}),patch.object(bridge,'ops',side_effect=[json.dumps(chain),json.dumps(chain),GENESIS]) as operation,patch.object(bridge,'run',return_value='{"status":"running"}'):
                 result=bridge.collect('snapshot','')
         self.assertIsNone(result['wallet']);self.assertFalse(result['wallet_inventory_complete'])
         self.assertNotIn(('capt','rpc','wallet'),[call.args for call in operation.call_args_list])
