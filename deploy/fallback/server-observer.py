@@ -44,7 +44,7 @@ def request(raw):
     if len(raw)>4096:raise ValueError('request bound exceeded')
     value=json.loads(raw)
     if not isinstance(value,dict):raise ValueError('invalid bridge request')
-    if value.get('kind') in {'financial_readiness','claimant_inventory','direct_journal'}:
+    if value.get('kind') in {'financial_readiness','claimant_inventory','direct_journal','closed_frontier'}:
         if set(value)!={'kind'}:raise ValueError('financial operation takes no arguments')
         return value['kind'],None
     if value.get('kind')=='rounds_descriptor':
@@ -144,7 +144,7 @@ def page(kind,after):
     return {'kind':kind,'fallback_protocol':3,'rows':rows,'next':rows[-1][field] if more else None,'inventory_consistent':False,
         'validation_scope':'trusted server claims; independently verify chain, backing, signatures and rightful ownership'}
 
-def claimant_sql():
+def claimant_sql(closed=False):
     # Complete bounded candidate tables in ONE snapshot, including spent logical
     # ancestors whose physical backing remains. These are not summed liabilities:
     # delegated predecessors/replacements and internal HTLCs need arbitration.
@@ -162,10 +162,64 @@ def claimant_sql():
         'participation_inputs':("round_part_input i", "i.participation_id,i.vtxo_id", "i.participation_id,i.vtxo_id,(i.signed_forfeit_tx IS NOT NULL) AS forfeit_signed", "EXISTS (SELECT 1 FROM round_participation p WHERE p.id=i.participation_id AND (p.forfeited_at IS NULL OR EXISTS (SELECT 1 FROM vtxo v WHERE v.spent_in_round=p.id AND v.onchain_spent_txid IS NULL)))"),
         'participation_outputs':("round_part_output o", "o.participation_id,o.policy,o.amount", "o.participation_id,encode(o.policy,'hex') AS policy,o.amount,o.unblinded_mailbox_id", "EXISTS (SELECT 1 FROM round_participation p WHERE p.id=o.participation_id AND (p.forfeited_at IS NULL OR EXISTS (SELECT 1 FROM vtxo v WHERE v.spent_in_round=p.id AND v.onchain_spent_txid IS NULL)))"),
     }
+    if closed:
+        # Closed-cohort admission needs historical ancestors and proof that
+        # prohibited paths have no rows, not a convenient active-only prefix.
+        tables={name:(table,key,columns,'true') for name,(table,key,columns,where) in tables.items()}
+        table,key,columns,_=tables['coins']
+        tables['coins']=(table,key,columns+',onchain_spent_height,onchain_spent_txid','true')
+        for name,(table,key,columns) in DIRECT_JOURNAL_COLUMNS.items():
+            tables['journal_'+name]=(table,key,columns,'true')
+        tables['nursery']=('nursery_tx','id','id,txid,confirm_target_height,confirmed_at_height,abandoned_at,created_at,updated_at,kind','true')
+        tables['rounds']=('public.round','id','id,seq,funding_txid,expiry,swept_at,created_at','true')
     fields=[]
     for name,(table,key,columns,where) in tables.items():
         fields.append("'"+name+"',(SELECT coalesce(jsonb_agg(q),'[]'::jsonb) FROM (SELECT "+columns+" FROM "+table+" WHERE "+where+" ORDER BY "+key+" LIMIT "+str(FINANCIAL_ROW_LIMIT+1)+") q)")
-    return "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='8s'; SELECT jsonb_build_object("+','.join(fields)+"); COMMIT;"
+    payload="jsonb_build_object("+','.join(fields)+")"
+    if closed:payload="jsonb_build_object('snapshot',pg_current_snapshot()::text,'observed_at',transaction_timestamp(),'rows',"+payload+")"
+    return "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL statement_timeout='8s'; SELECT "+payload+"; COMMIT;"
+
+def closed_frontier():
+    lines=[line for line in ops('sql',claimant_sql(closed=True)).splitlines() if line.startswith('{')]
+    if len(lines)!=1:raise ValueError('invalid closed frontier database response')
+    frame=json.loads(lines[0])
+    expected=FINANCIAL_TABLES|{'journal_'+name for name in DIRECT_JOURNAL_COLUMNS}|{'nursery','rounds'}
+    if (not isinstance(frame,dict) or set(frame)!={'snapshot','observed_at','rows'}
+            or not isinstance(frame['snapshot'],str) or not frame['snapshot']
+            or not isinstance(frame['rows'],dict) or set(frame['rows'])!=expected):
+        raise ValueError('incomplete closed frontier frame')
+    rows=frame['rows']
+    if (any(not isinstance(items,list) or len(items)>FINANCIAL_ROW_LIMIT for items in rows.values())
+            or sum(map(len,rows.values()))>FINANCIAL_ROW_LIMIT):
+        raise ValueError('whole closed frontier exceeds row budget')
+    fields={
+        'coins':'vtxo_id amount expiry spend_state policy_type policy anchor_point vtxo_txid oor_spent_txid spent_in_round offboarded_in frontier_at confirmed_height onchain_spent_height onchain_spent_txid',
+        'pending_boards':'vtxo_id expiry', 'links':'user_pubkey mailbox_pk child_index',
+        'records':'mailbox_pk spk account_xpub mailbox_sig account_sig',
+        'pool':'id vtxo_id expiry_height amount', 'lightning_nodes':'id pubkey',
+        'htlcs':'id payment_hash htlc_expiry direction offchain_resolution chain_resolution chain_resolution_height collection_recorded',
+        'receives':'id lightning_node_id payment_hash status lowest_incoming_htlc_expiry accepted_at final_amount_msat receiver_mailbox_id',
+        'payments':'id lightning_node_id payment_hash status amount_msat final_amount_msat sender_mailbox_id lightning_htlc_subscription_id block_height user_fee_sat invoice_expires_at',
+        'participations':'id round_id created_at forfeited_at scheduled_height unlock_available',
+        'participation_inputs':'participation_id vtxo_id forfeit_signed',
+        'participation_outputs':'participation_id policy amount unblinded_mailbox_id',
+        'nursery':'id txid confirm_target_height confirmed_at_height abandoned_at created_at updated_at kind',
+        'rounds':'id seq funding_txid expiry swept_at created_at'}
+    allowed={name:set(value.split()) for name,value in fields.items()}
+    allowed.update({'journal_'+name:value for name,value in DIRECT_JOURNAL_FIELDS.items()})
+    for name,items in rows.items():
+        for item in items:
+            if not isinstance(item,dict) or set(item)!=allowed[name]:raise ValueError('unexpected closed frontier fields')
+            if name=='journal_carriers':
+                inputs=item['fee_inputs']
+                if not isinstance(inputs,list) or any(not isinstance(i,dict) or set(i)!={'outpoint','value_sat','script_pubkey'} for i in inputs):
+                    raise ValueError('unexpected closed frontier fee input fields')
+    result={'kind':'closed_frontier','schema_version':1,'fallback_protocol':3,**frame,
+        'read_only':True,'inventory_consistent':True,'database_tables_complete':True,
+        'row_limit_total':FINANCIAL_ROW_LIMIT,'complete':False,'qualified':False,
+        'validation_scope':'exhaustive bounded public database frontier and retained journal in one snapshot; no signed bytes, resolved ownership, chain validity, wallet completeness or operating readiness claim'}
+    if len(json.dumps(result,allow_nan=False).encode())>MAX_BYTES:raise ValueError('whole closed frontier exceeds byte budget')
+    return result
 
 def claimant_inventory():
     lines=[line for line in ops('sql',claimant_sql()).splitlines() if line.startswith('{')]
@@ -516,6 +570,7 @@ def financial_readiness():
     finally:READ_DEADLINE=previous
 
 def collect(kind,after):
+    if kind=='closed_frontier':return closed_frontier()
     if kind=='direct_journal':return direct_journal()
     if kind=='claimant_inventory':return claimant_inventory()
     if kind=='financial_readiness':return financial_readiness()
