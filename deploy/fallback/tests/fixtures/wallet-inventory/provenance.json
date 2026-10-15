@@ -2,20 +2,25 @@
   "fixtures": [
     {
       "file": "native-rounds.json",
-      "sha256": "2ce8abd20486623d0e9413969ee55273aba459a4dd5d10cd4c99dad6bbac62f1",
-      "producer_commit": "2b1cab37697600c23ddb1f106b6b92b08e308438",
-      "source_evidence": "/home/francis/bark-integration-2026-10-01/sweep-to-payout-evidence-2026-10-13/noah/wallet-inventory/rounds-wallet-inventory.json",
-      "scope": "Unchanged actual local regtest owning-daemon CLI source frame; no live target, global epoch, financial-readiness or direct-route qualification"
+      "sha256": "c35bf74092c29bfd72cdeab0e9f61dad3bd2e6cbeb72d236411d53c34b904446",
+      "producer_commit": "ce3013d5056582e5637be6330663746885dac789",
+      "scope": "Unchanged actual current integrated owning-daemon regtest CLI JSON; no live or global treasury qualification"
     },
     {
       "file": "native-watchman.json",
-      "sha256": "bb64d044381cdf23a512a33fdbd2cfdb57d7b7e526a0632623f5dc06d8b70626",
-      "producer_commit": "3b4ba783052df11e28691ba6c4418d276d7ef418",
-      "source_evidence": "/home/francis/bark-integration-2026-10-01/sweep-to-payout-evidence-2026-10-13/noah/watchman-wallet-inventory/watchman-wallet-inventory.json",
-      "scope": "Unchanged actual local regtest owning-daemon CLI source frame; no live target, global epoch, financial-readiness or direct-route qualification"
+      "sha256": "fab441e879624268282917ef879450ec237e048fd95e0835f53c9279ad0e5d92",
+      "producer_commit": "ce3013d5056582e5637be6330663746885dac789",
+      "scope": "Unchanged actual current integrated owning-daemon regtest CLI JSON; no live or global treasury qualification"
+    },
+    {
+      "file": "native-rounds-pending.json",
+      "sha256": "32d2744947fec373c3b3d11ffa5bad710e17928b5f5017c625f50936f43374fb",
+      "producer_commit": "ce3013d5056582e5637be6330663746885dac789",
+      "scope": "Unchanged actual current integrated owning-daemon regtest CLI JSON; no live or global treasury qualification"
     }
   ],
-  "separate_native_runs": true,
+  "native_qualification": "3 actual tests PASS11.987; private receipts outside deploymentrepo",
+  "separate_native_sources": true,
   "globally_atomic": false,
-  "private_keys_seeds_credentials_preimages": false
+  "historical_frames_preserved": true
 }

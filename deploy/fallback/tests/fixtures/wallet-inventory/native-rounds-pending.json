@@ -1,0 +1,58 @@
+{
+  "complete": false,
+  "missing_sources": [
+    "watchmand owns its wallet; inventory unavailable from captaind"
+  ],
+  "rounds": {
+    "complete": true,
+    "last_revealed_index": 4,
+    "min_trusted_confirmations": 1,
+    "network": "regtest",
+    "pending_parents": [
+      {
+        "encoding": "bitcoin-stripped-body-v1",
+        "signed_weight_wu": 657,
+        "transaction_body": "02000000011b75eb01f601562d57b2bb3c3f5ef01e76d61e56cd581c11e53e90ed232da2ea0000000000fdffffff0240420f00000000002251203db5562daa39647727c1d6c5b8a2c84296ee89ecbe02dc611b4a11acd68f204c1baff6290100000022512087f0158d34c0bdd1252d2bb68f7abac7016313aab4e294d8ce562df6e94d651168000000",
+        "txid": "74b154a7bc350b9da70b2fc75206bba3dfb779831f5f2a818d58fc17081f89d0"
+      }
+    ],
+    "pending_transaction_scope": "canonical_wallet_graph_only",
+    "pending_transactions": [
+      {
+        "encoding": "bitcoin-stripped-body-v1",
+        "signed_weight_wu": 568,
+        "transaction_body": "0200000001d0891f0817fc588d812a5f1f8379b7dfa3bb0652c72f0ba79d0b35bca754b1740000000000fdffffff02d1a80a00000000002251209d65dfa87546fa5255020bd3a584283e1e809831891e630478d327f2b2a8db09e093040000000000160014e4afc09de5c00fda47b16059925064d70cfd92e469000000",
+        "txid": "88e755de09634dae83e431f49229fba74bf5c75e058b8c5fa01bf865dc70224c"
+      }
+    ],
+    "public_descriptor": "tr(tpubD9EXXJhvaGLJDHyQTQZxCz39aTVDeKh3juD3Sp3QRwGcicbssFsLxcAicDsRH1q1zq1MGG3noR4hAPKszFtM7Zy7gK2JjCCRo4adtFoEWFa/0/*)#nf4wu4qh",
+    "reserved_outpoints": [],
+    "tip_hash": "70c3e4036e67385b6c5fe0f541aaaae4c261beed59089988632f09fa82ff88f4",
+    "tip_height": 105,
+    "unavailable_parent_txids": [],
+    "utxos": [
+      {
+        "coinbase": false,
+        "confirmation_block_hash": null,
+        "confirmation_time": null,
+        "confirmations": 0,
+        "confirmed_fee_eligible": false,
+        "confirmed_height_upper_bound": null,
+        "confirming_descendant_txid": null,
+        "derivation_index": 0,
+        "keychain": "external",
+        "mature": true,
+        "outpoint": "88e755de09634dae83e431f49229fba74bf5c75e058b8c5fa01bf865dc70224c:0",
+        "reserved": false,
+        "script_pubkey": "51209d65dfa87546fa5255020bd3a584283e1e809831891e630478d327f2b2a8db09",
+        "transaction_eligible": true,
+        "trusted": true,
+        "unconfirmed_first_seen": 1792026924,
+        "unconfirmed_last_seen": 1792026924,
+        "value_sat": 698577
+      }
+    ],
+    "wallet": "rounds"
+  },
+  "watchman": null
+}

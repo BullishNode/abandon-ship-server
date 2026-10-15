@@ -314,7 +314,8 @@ WALLET_SOURCES={
     'watchman':('watchmand','abandon-signet-fallback-fb-watchmand-1','127.0.0.1:3538'),
 }
 WALLET_FIELDS={'wallet','network','public_descriptor','tip_height','tip_hash',
-    'min_trusted_confirmations','utxos','complete','reserved_outpoints','last_revealed_index'}
+    'min_trusted_confirmations','utxos','complete','reserved_outpoints','last_revealed_index',
+    'pending_transactions','pending_parents','unavailable_parent_txids','pending_transaction_scope'}
 UTXO_FIELDS={'outpoint','value_sat','script_pubkey','keychain','derivation_index',
     'confirmed_height_upper_bound','confirmation_block_hash','unconfirmed_first_seen','unconfirmed_last_seen',
     'coinbase','confirmations','mature','trusted','reserved','transaction_eligible','confirmed_fee_eligible',
@@ -337,6 +338,33 @@ def public_outpoint(value):
     bounded_integer(int(value.split(':')[1]),2**32-1)
 
 
+def wallet_transaction(row):
+    if not isinstance(row,dict) or set(row)!={'txid','transaction_body','signed_weight_wu','encoding'}:
+        raise ValueError('invalid public wallet transaction fields')
+    public_hash(row['txid']);bounded_integer(row['signed_weight_wu'],4_000_000)
+    body=row['transaction_body']
+    if row['encoding']!='bitcoin-stripped-body-v1' or not isinstance(body,str) or not re.fullmatch(r'(?:[0-9a-f]{2}){10,1048576}',body):
+        raise ValueError('invalid public wallet body encoding')
+    # Reuse Core's decoder. Never export its response or private error text.
+    # A stripped body does not independently prove the original signed weight.
+    tx=json.loads(ops('cli','decoderawtransaction',body))
+    weight=2*len(body)
+    if (not isinstance(tx,dict) or tx.get('txid')!=row['txid'] or tx.get('hash')!=row['txid'] or tx.get('weight')!=weight
+            or not weight<=row['signed_weight_wu']<=4_000_000):
+        raise ValueError('public wallet body identity or weight differs')
+    inputs=tx.get('vin')
+    if not isinstance(inputs,list) or not inputs:raise ValueError('public wallet body has no inputs')
+    points=set()
+    for item in inputs:
+        if not isinstance(item,dict) or not isinstance(item.get('scriptSig'),dict) or item['scriptSig'].get('hex')!='' or item.get('txinwitness'):
+            raise ValueError('private or unsafe wallet input refused')
+        public_hash(item.get('txid'));bounded_integer(item.get('vout'),2**32-1)
+        point=(item['txid'],item['vout'])
+        if point in points:raise ValueError('duplicate public wallet input')
+        points.add(point)
+    return {txid for txid,_ in points}
+
+
 def validate_wallet_frame(value,owner,network):
     # Reject unknown fields, especially private additions, instead of exporting
     # or silently sanitizing a partial source as a complete wallet snapshot.
@@ -347,8 +375,9 @@ def validate_wallet_frame(value,owner,network):
         'captaind owns its rounds wallet; collect its separate source without assuming global atomicity')
     if value[opposite] is not None or value['missing_sources']!=[expected]:raise ValueError('invalid separate-owner scope')
     wallet=value[owner]
-    if not isinstance(wallet,dict) or set(wallet)!=WALLET_FIELDS or wallet['wallet']!=owner or wallet['network']!=network or wallet['complete'] is not True:
+    if not isinstance(wallet,dict) or set(wallet)!=WALLET_FIELDS or wallet['wallet']!=owner or wallet['network']!=network or type(wallet['complete']) is not bool:
         raise ValueError('incomplete or incompatible owning-wallet snapshot')
+    if wallet['pending_transaction_scope']!='canonical_wallet_graph_only':raise ValueError('unknown wallet graph scope')
     descriptor=wallet['public_descriptor']
     if not isinstance(descriptor,str) or len(descriptor)>1024 or not re.fullmatch(r'[a-zA-Z0-9\[\]/(),#*<>;\x27]+',descriptor):
         raise ValueError('invalid public descriptor')
@@ -359,8 +388,27 @@ def validate_wallet_frame(value,owner,network):
     if wallet['min_trusted_confirmations']==0:raise ValueError('invalid wallet trust threshold')
     bounded_integer(wallet['last_revealed_index'],2**32-1,True)
     rows=wallet['utxos'];reserved=wallet['reserved_outpoints']
-    if not isinstance(rows,list) or len(rows)>FINANCIAL_ROW_LIMIT or not isinstance(reserved,list) or len(reserved)>FINANCIAL_ROW_LIMIT:
-        raise ValueError('owning-wallet row budget exceeded')
+    pending=wallet['pending_transactions'];parents=wallet['pending_parents'];unavailable=wallet['unavailable_parent_txids']
+    collections=(rows,reserved,pending,parents,unavailable)
+    if any(not isinstance(c,list) for c in collections) or sum(map(len,collections))>FINANCIAL_ROW_LIMIT:
+        raise ValueError('owning-wallet aggregate row budget exceeded')
+    for txid in unavailable:public_hash(txid)
+    if len(set(unavailable))!=len(unavailable) or wallet['complete']!=(not bool(unavailable)):
+        raise ValueError('invalid missing wallet parent declaration')
+    # Check every row's field whitelist before any body reaches Core.
+    for row in pending+parents:
+        if not isinstance(row,dict) or set(row)!={'txid','transaction_body','signed_weight_wu','encoding'}:
+            raise ValueError('invalid public wallet transaction fields')
+        public_hash(row['txid'])
+    parent_ids=set();needed=set();pending_ids=set()
+    for row in pending:
+        if row['txid'] in pending_ids:raise ValueError('duplicate pending transaction')
+        pending_ids.add(row['txid']);needed.update(wallet_transaction(row))
+    for row in parents:
+        if row['txid'] in parent_ids:raise ValueError('duplicate wallet parent')
+        parent_ids.add(row['txid']);wallet_transaction(row)
+    if parent_ids & set(unavailable) or parent_ids | set(unavailable)!=needed:
+        raise ValueError('wallet immediate-parent coverage differs')
     for point in reserved:public_outpoint(point)
     if len(set(reserved))!=len(reserved):raise ValueError('duplicate wallet reservation')
     seen=set()
@@ -441,8 +489,10 @@ def _financial_readiness():
     if not wallets['owning_sources_available']:gaps.append('runtime_wallet_inventory_with_canonical_positions_and_active_input_locks')
     for owner,frame in wallets['frames'].items():
         if not frame['available']:gaps.append(frame['missing_source'])
-        elif (frame['source'][owner]['tip_height'],frame['source'][owner]['tip_hash'])!=(ending['blocks'],ending['bestblockhash']):
-            gaps.append(owner+'_wallet_source_tip_not_current')
+        else:
+            if not frame['source'][owner]['complete']:gaps.append(owner+'_wallet_parent_source_incomplete')
+            if (frame['source'][owner]['tip_height'],frame['source'][owner]['tip_hash'])!=(ending['blocks'],ending['bestblockhash']):
+                gaps.append(owner+'_wallet_source_tip_not_current')
     if wallets['owning_sources_available'] and wallets['frames']['rounds']['source']['rounds']['public_descriptor']==wallets['frames']['watchman']['source']['watchman']['public_descriptor']:
         gaps.append('owning_wallet_sources_duplicate_descriptor')
     if not declarations.get('wallets_declared_complete'):gaps.append('public_rounds_and_watchman_wallet_declarations')
