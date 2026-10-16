@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-16T02:03:27.157621+00:00",
+  "track": "B",
+  "role": "Source reference for existing deployed public native-fallback templates and scripts",
+  "baseline_commit": "6f1bc0523fb758ff3fcac04227d6275765743309",
+  "actual_public_source": {
+    "scope": "Exactly these14publicfiles match fresh read-only deployed bytes. Other repository paths are not asserted deployed.",
+    "files": {
+      "SIMULATION.md": {
+        "mode": "0o664",
+        "bytes": 2144,
+        "sha256": "45c726eff02909f9a97135919e54775bd2467b00aee53fb182e496665b26d148"
+      },
+      "ark.conf": {
+        "mode": "0o664",
+        "bytes": 135,
+        "sha256": "59f9ef7b0c575f1484fd627fe448befea0f711ed8bffefa04e3cde29dc19599e"
+      },
+      "bringup.sh": {
+        "mode": "0o775",
+        "bytes": 1924,
+        "sha256": "ec0b7631bd8b531816db598c8bc11501ff66422eeb065709329b04c91d3facd2"
+      },
+      "compose.yaml": {
+        "mode": "0o644",
+        "bytes": 5557,
+        "sha256": "d8512b4e6c23f0981aaf9ccc0cd0f47d8959e08cb0fe5079c9865631c2c12778"
+      },
+      "dcf": {
+        "mode": "0o755",
+        "bytes": 663,
+        "sha256": "afda281d1a170679e57c9ddda7e4e5d868c5ef59e680746e18dc08164643eaa6"
+      },
+      "images.Dockerfile": {
+        "mode": "0o664",
+        "bytes": 1081,
+        "sha256": "fbeeaf83cf534d752ff27afe4bd41041c0684c2f2ced50e0fe123ee40b1d2715"
+      },
+      "render.sh": {
+        "mode": "0o775",
+        "bytes": 1968,
+        "sha256": "f633462eb8d31cd3db8440771401158eb6e7a9e29323212ce1fd28ccfd0d8a41"
+      },
+      "sql/expiry-fallback.sql": {
+        "mode": "0o664",
+        "bytes": 1321,
+        "sha256": "26abb623a9912a92be59438c8a2ff541cf38fb2d35115b0939e9f494aaf744f9"
+      },
+      "sql/expiry-settlement.sql": {
+        "mode": "0o664",
+        "bytes": 1082,
+        "sha256": "586c00d5afa6aac28c305f9f30d012fa8f6393cfaee342db3fa9aa848acb58fa"
+      },
+      "templates/captaind.toml.tmpl": {
+        "mode": "0o664",
+        "bytes": 3765,
+        "sha256": "8d471d742e46bcd70a694c1220860a86d1bf54c388d4f25d4880571c8083ba09"
+      },
+      "templates/simulation-cln.toml.tmpl": {
+        "mode": "0o664",
+        "bytes": 590,
+        "sha256": "0bf13efcb40494dea87c38df7b3a04350347334d3835f67fd1fc383522a2d3d2"
+      },
+      "templates/watchmand.toml.tmpl": {
+        "mode": "0o664",
+        "bytes": 1035,
+        "sha256": "547aa119bec10d452e145b7b99fc2fd9e2802c951cd48b1d61348195e8c71548"
+      },
+      "ops.sh": {
+        "mode": "0o755",
+        "bytes": 1858,
+        "sha256": "b97e35608b1740da9f94e58ca563cc6c84effc1b491de6b1496e98909cf654f1"
+      },
+      "upgrade.sh": {
+        "mode": "0o775",
+        "bytes": 1809,
+        "sha256": "983a16e20d50236311f61aac05d4b36fc093525b7ccfd83112ba4d65016d1585"
+      }
+    },
+    "captured_overlay_archive_sha256": "997c149a3f5a43c457d343c721c00eea3d91fa6099e2236a6049fc1c67edb7a6",
+    "original_manifest_sha256": "b22e8ba2619acbf44b9f55395f973001f9161389a699d09cb42b9016228b0e15"
+  },
+  "actual_native_runtime": {
+    "source_commit": "4d041f7f2f13ba0a5a95e540c70d6aba60f9bb50",
+    "image_id": "sha256:da797d16bd5441e04cc3564540c166a2885c0b63588ec0b5c3773f17f3eae014",
+    "ELF_sha256": {
+      "captaind": "c9a2922a92066609bfdbb355bab55d25f816882942c0f09ba0fda36e30355796",
+      "watchmand": "9b7e8d05321a2cca23447f8e51020aff363b1cbf37e07d7395f165ab6125db50",
+      "bark": "ed312c5597a080af77595b8377e6e6b94140659b094aa4027d6b09fb57beb1d1",
+      "barkd": "a0f6a12e261f0a13ed0c2a48c9e49749f98fbdb8573e8f685c2728ca6a6024dd"
+    },
+    "startup_manifest_sha256": "7a6cb1a51a6d5db9a9c752efe4dc601900e13edb93f72b7b95eed5396aacc43e",
+    "schema_sha256": "d3c090af2317ebd88cbf86e9db81fabbed458d21d6e2f0fdc544f7dc8b0464da"
+  },
+  "component_versions": {
+    "native_server": "4d041f7f2f13ba0a5a95e540c70d6aba60f9bb50",
+    "simulator_installed_SDK": "5e5994d3ab6844a443cef1e9d19a9195ed785486",
+    "legacy_web_image": "sha256:49e3f34c143eae140d77df4dc50d0b730204ac58abdf45ee59f29b871e4a063f",
+    "legacy_web_source_commit": null,
+    "legacy_web_source_status": "Original build/deployment image binding found; full source revision proof pending"
+  },
+  "deployment_effect": "None. Existing deployed code captured; no services, wallets, configuration, financial state or images changed.",
+  "private_environment": "Excluded. No secrets.env, runtime env, private config, wallet, database, signing material or state exported.",
+  "git_mode_scope": "Git tracks executable bit only; actual observed deployed permissions retained in files metadata.",
+  "candidate_release_status": "Rebased69ca/598 and web965 are qualification candidates and are not represented as deployed here."
+}

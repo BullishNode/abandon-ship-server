@@ -16,7 +16,8 @@ psql_file() { dcf exec -T fb-postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d 
 case "${1:?usage: upgrade.sh server|wallets}" in
 server)
 	. ./fallback/signet-fallback.env
-	for image in captaind bark; do sudo docker image inspect "abandon-ship/$image:fallback-$FORK_COMMIT" >/dev/null; done
+	sudo docker image inspect "abandon-ship/captaind:fallback-${SERVER_FORK_COMMIT:-$FORK_COMMIT}" >/dev/null
+	sudo docker image inspect "abandon-ship/bark:fallback-$FORK_COMMIT" >/dev/null
 	dcf stop fb-web fb-web2 fb-api fb-api2 fb-barkd fb-barkd2 fb-watchmand fb-captaind
 	# Idempotent: CREATE/ADD ... IF NOT EXISTS only.
 	psql_file fallback/sql/expiry-settlement.sql
