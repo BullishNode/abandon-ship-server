@@ -619,9 +619,11 @@ def native_ordinary_fee_budget():
             'external_future_reserved_sat','opening_native_spent_sat','opening_external_spent_sat',
             'history_prefix_bytes','history_prefix_sha256','accounting_receipt_sha256','opening_charge_sat',
             'reserved_ceiling_sum_sat','attempt_count','total_charged_sat','remaining_ordinary_allowance_sat',
+            'ordinary_attempt_count','urgent_attempt_count','urgent_reserved_ceiling_sum_sat',
+            'urgent_binding_count','remaining_urgent_allowance_sat','remaining_discretionary_allowance_sat',
             'runtime_loaded_identity_verified','retained_signed_fee_coverage_verified',
             'urgent_selection_isolation_verified','complete','qualified','observed_at','completed_at','source_mount_identity_sha256'}
-        if set(result)!=fields or any(result[name]is not False for name in
+        if set(result)!=fields or type(result['schema_version'])is not int or result['schema_version']!=2 or any(result[name]is not False for name in
                 ('runtime_loaded_identity_verified','retained_signed_fee_coverage_verified',
                  'urgent_selection_isolation_verified','complete','qualified')):
             raise ValueError('native disk projection scope changed')

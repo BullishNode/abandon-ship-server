@@ -32,6 +32,65 @@ def install(directory,files):
     for name,raw in files.items():(directory/name).write_bytes(raw)
 
 class NativeBudgetObservation(unittest.TestCase):
+    def test_mixed_urgent_reservations_charge_once_and_bindings_stay_private(self):
+        private_package=[[1]*10,[2]*10]
+        binding='a'*64
+        record=b'1000\nu:1:2000\np:1:'+binding.encode()+b':'+encode(private_package)+b'\n500\nu:2:3000\n'
+        facts=reader.project(source(ledger=record))
+        self.assertEqual(facts['total_charged_sat'],32364)
+        self.assertEqual(facts['reserved_ceiling_sum_sat'],6500)
+        self.assertEqual(facts['attempt_count'],4)
+        self.assertEqual(facts['ordinary_attempt_count'],2)
+        self.assertEqual(facts['urgent_attempt_count'],2)
+        self.assertEqual(facts['urgent_reserved_ceiling_sum_sat'],5000)
+        self.assertEqual(facts['urgent_binding_count'],1)
+        self.assertEqual(facts['remaining_urgent_allowance_sat'],10000)
+        self.assertEqual(facts['remaining_discretionary_allowance_sat'],17636)
+        encoded=encode(facts)
+        self.assertNotIn(binding.encode(),encoded)
+        self.assertNotIn(encode(private_package),encoded)
+        self.assertFalse(facts['qualified'])
+
+    def test_urgent_binding_never_replenishes_or_charges_again(self):
+        reservation=b'u:1:15000\n';binding=b'p:1:'+b'a'*64+b':'+encode([[1]*10])+b'\n'
+        first=reader.project(source(ledger=reservation))
+        bound=reader.project(source(ledger=reservation+binding))
+        for key in ('total_charged_sat','reserved_ceiling_sum_sat','remaining_urgent_allowance_sat','remaining_ordinary_allowance_sat'):
+            self.assertEqual(first[key],bound[key])
+        self.assertEqual(bound['remaining_urgent_allowance_sat'],0)
+        self.assertEqual(bound['total_charged_sat'],40864)
+        self.assertEqual(bound['urgent_binding_count'],1)
+
+    def test_urgent_indices_amounts_and_shared_or_urgent_exhaustion_refuse(self):
+        for raw in (b'u:0:1\n',b'u:01:1\n',b'u:2:1\n',b'u:1:0\n',b'u:1:01\n',
+                    b'u:1:-1\n',b'u:1:1\nu:1:1\n',b'u:1:15001\n',
+                    b'34136\nu:1:1\n',b'u:1:1',b'unknown:1\n'):
+            with self.subTest(raw=raw),self.assertRaises(ValueError):reader.project(source(ledger=raw))
+
+    def test_bindings_require_prior_reservation_exact_once_and_canonical_envelope(self):
+        good=b'p:1:'+b'a'*64+b':'+encode([[1]*10])+b'\n'
+        for raw in (good,b'u:1:1\n'+good+good,b'u:1:1\n'+good.replace(b'p:1:',b'p:01:'),
+                    b'u:1:1\n'+good.replace(b'a'*64,b'A'*64),
+                    b'u:1:1\n'+good.replace(b'a'*64,b'0'*64),
+                    b'u:1:1\n'+good.replace(b'[[1,',b'[[ 1,')):
+            with self.subTest(raw=raw),self.assertRaises(ValueError):reader.project(source(ledger=raw))
+
+    def test_binding_byte_envelope_bounds_and_types_refuse(self):
+        for package in ([],[[1]*10]*3,[[1]*9],[[256]*10],[[-1]*10],[[True]*10],
+                        [['1']*10],{'secret':'never-export'},[[1]*10,[1]*10],[[[1]]*10]):
+            raw=b'u:1:1\np:1:'+b'a'*64+b':'+encode(package)+b'\n'
+            with self.subTest(package=package),self.assertRaises(ValueError):reader.project(source(ledger=raw))
+
+    def test_historical_full_allowance_is_observed_without_claiming_new_urgent_isolation(self):
+        facts=reader.project(source(ledger=b'34136\n'))
+        self.assertEqual(facts['remaining_ordinary_allowance_sat'],0)
+        self.assertEqual(facts['remaining_discretionary_allowance_sat'],0)
+        self.assertEqual(facts['remaining_urgent_allowance_sat'],15000)
+        self.assertFalse(facts['urgent_selection_isolation_verified'])
+
+    def test_crlf_mixed_history_matches_native_lines(self):
+        self.assertEqual(reader.project(source(ledger=b'1000\r\nu:1:2000\r\n'))['total_charged_sat'],28864)
+
     def test_adopted_costs_partition_and_full_ceiling_charges_are_distinct(self):
         facts=reader.project(source(ledger=b'10000\n5000\n'))
         self.assertEqual(facts['opening_charge_sat'],25864)

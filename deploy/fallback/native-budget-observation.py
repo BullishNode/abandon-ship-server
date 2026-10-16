@@ -53,6 +53,54 @@ def canonical(raw,keys):
     return value
 
 
+def reservations(history,initial,policy):
+    """Project charges only. Native code authenticates signed package semantics.
+
+    Binding records contain private witnesses: validate their bounded envelope,
+    then retain only an aggregate count. They never charge or refund a ceiling.
+    """
+    if history and not history.endswith(b'\n'):raise ValueError('torn native reservation append')
+    ordinary=urgent=ordinary_count=bindings=0;attempts={}
+    for line in history.split(b'\n')[:-1]:
+        # Match Rust str::lines, including CRLF, but no other separators.
+        line=line.removesuffix(b'\r')
+        if line.startswith(b'u:'):
+            match=re.fullmatch(b'u:([1-9][0-9]{0,15}):([1-9][0-9]{0,15})',line)
+            if not match:raise ValueError('noncanonical urgent reservation')
+            index,ceiling=map(int,match.groups());amount(ceiling,True)
+            if index!=len(attempts)+1:raise ValueError('urgent reservation order differs')
+            attempts[index]=False;urgent+=ceiling
+            if urgent>policy['urgent_reserve_sat']:raise ValueError('urgent reservations exceed sublimit')
+        elif line.startswith(b'p:'):
+            parts=line.split(b':',3)
+            if len(parts)!=4 or not re.fullmatch(b'[1-9][0-9]{0,15}',parts[1]):raise ValueError('invalid urgent binding index')
+            index=int(parts[1]);binding=parts[2].decode('ascii');digest(binding)
+            if binding=='0'*64 or index not in attempts or attempts[index]:raise ValueError('missing or duplicate urgent binding')
+            package=json.loads(parts[3])
+            if not isinstance(package,list) or not 1<=len(package)<=2:raise ValueError('urgent package envelope bound')
+            if any(not isinstance(tx,list) or not 10<=len(tx)<=400000 or
+                   any(type(byte)is not int or not 0<=byte<=255 for byte in tx) for tx in package):
+                raise ValueError('urgent transaction byte envelope bound')
+            if len({bytes(tx) for tx in package})!=len(package):raise ValueError('duplicate urgent package bytes')
+            if json.dumps(package,separators=(',',':'),allow_nan=False).encode()!=parts[3]:raise ValueError('noncanonical urgent package envelope')
+            attempts[index]=True;bindings+=1
+        else:
+            if not re.fullmatch(b'[1-9][0-9]{0,15}',line):raise ValueError('noncanonical positive reservation')
+            ordinary+=amount(int(line),True);ordinary_count+=1
+        if initial+ordinary+urgent>policy['ordinary_budget_sat']:raise ValueError('reservations exceed shared allowance')
+    remaining=policy['ordinary_budget_sat']-initial-ordinary-urgent
+    urgent_remaining=policy['urgent_reserve_sat']-urgent
+    return {'reserved_ceiling_sum_sat':ordinary+urgent,'attempt_count':ordinary_count+len(attempts),
+        'ordinary_attempt_count':ordinary_count,'urgent_attempt_count':len(attempts),
+        'urgent_reserved_ceiling_sum_sat':urgent,'urgent_binding_count':bindings,
+        'total_charged_sat':initial+ordinary+urgent,'remaining_ordinary_allowance_sat':remaining,
+        'remaining_urgent_allowance_sat':urgent_remaining,
+        # Historical decimal-only ledgers remain observable even if the new
+        # runtime will refuse their insufficient urgent headroom. No readiness
+        # or retroactive urgent isolation is inferred by this disk projection.
+        'remaining_discretionary_allowance_sat':max(0,remaining-urgent_remaining)}
+
+
 def project(files):
     if set(files)!=set(LIMITS) or any(type(files[name])is not bytes or len(files[name])>limit for name,limit in LIMITS.items()):
         raise ValueError('native budget source bounds')
@@ -80,15 +128,8 @@ def project(files):
     elif not prefix or not native or receipt in (None,'0'*64):raise ValueError('adoption requires original history and receipt')
     initial=native+external+policy['external_future_reserved_sat']
     if initial>policy['ordinary_budget_sat']:raise ValueError('opening exceeds ordinary allowance')
-    if history and not history.endswith(b'\n'):raise ValueError('torn native reservation append')
-    attempts=0;reserved=0
-    # Match Rust str::lines: LF or CRLF delimiters, no other byte separators.
-    for line in history.split(b'\n')[:-1]:
-        line=line.removesuffix(b'\r')
-        if not re.fullmatch(b'[1-9][0-9]{0,15}',line):raise ValueError('noncanonical positive reservation')
-        ceiling=amount(int(line),True);reserved+=ceiling;attempts+=1
-        if initial+reserved>policy['ordinary_budget_sat']:raise ValueError('reservations exceed ordinary allowance')
-    return {'schema_version':1,'source_scope':'public_native_disk_budget_observation',
+    charges=reservations(history,initial,policy)
+    return {'schema_version':2,'source_scope':'public_native_disk_budget_observation',
         'policy_sha256':hashlib.sha256(policy_raw).hexdigest(),'opening_sha256':opening_sha,
         'budget_file_sha256':hashlib.sha256(history).hexdigest(),'budget_file_bytes':len(history),
         'network':opening['network'],'genesis':opening['genesis'],'server_pubkey':opening['server_pubkey'],
@@ -97,8 +138,7 @@ def project(files):
         'opening_native_spent_sat':native,'opening_external_spent_sat':external,
         'history_prefix_bytes':prefix,'history_prefix_sha256':opening['history_prefix_sha256'],
         'accounting_receipt_sha256':receipt,'opening_charge_sat':initial,
-        'reserved_ceiling_sum_sat':reserved,'attempt_count':attempts,'total_charged_sat':initial+reserved,
-        'remaining_ordinary_allowance_sat':policy['ordinary_budget_sat']-initial-reserved,
+        **charges,
         'runtime_loaded_identity_verified':False,'retained_signed_fee_coverage_verified':False,
         'urgent_selection_isolation_verified':False,'complete':False,'qualified':False}
 
