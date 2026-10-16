@@ -44,7 +44,7 @@ def request(raw):
     if len(raw)>4096:raise ValueError('request bound exceeded')
     value=json.loads(raw)
     if not isinstance(value,dict):raise ValueError('invalid bridge request')
-    if value.get('kind') in {'financial_readiness','claimant_inventory','direct_journal','closed_frontier','native_ordinary_fee_budget'}:
+    if value.get('kind') in {'financial_readiness','claimant_inventory','direct_journal','closed_frontier','native_ordinary_fee_budget','native_fee_owner_snapshot'}:
         if set(value)!={'kind'}:raise ValueError('financial operation takes no arguments')
         return value['kind'],None
     if value.get('kind')=='rounds_descriptor':
@@ -602,6 +602,93 @@ def financial_readiness():
     try:return _financial_readiness()
     finally:READ_DEADLINE=previous
 
+def public_native_fee_snapshot(raw):
+    """Exact public native schema only; no financial qualification is inferred.
+
+    Do not parse private funding reservations or signed packages here. The
+    owning native process projects those with its own codec. Unknown fields at
+    every level fail closed so a future private addition cannot reach traces.
+    """
+    if not isinstance(raw,str) or not 0<len(raw.encode())<=MAX_BYTES:
+        raise ValueError('native owner response bound')
+    def unique(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result:raise ValueError('duplicate native owner field')
+            result[key]=value
+        return result
+    def invalid_constant(value):raise ValueError('nonfinite native owner value')
+    value=json.loads(raw,object_pairs_hook=unique,parse_constant=invalid_constant)
+    def fields(item,names):
+        if not isinstance(item,dict) or set(item)!=set(names.split()):
+            raise ValueError('unexpected native owner fields')
+    def number(item,key,upper=21_000_000*100_000_000,nullable=False):
+        bounded_integer(item[key],upper,nullable)
+    def hashes(item,names,nullable=False):
+        for key in names.split():public_hash(item[key],nullable)
+    fields(value,'schema policy_sha256 opening_sha256 journal_sha256 journal_device journal_inode journal_bytes policy opening charged_sat remaining_total_sat urgent_remaining_sat discretionary_remaining_sat direct_attempt_count direct_reserved_sat funding_reserved_sat round_reserved_sat pool_reserved_sat urgent_reserved_sat funding urgent resolutions')
+    if type(value['schema'])is not int or value['schema']!=1:
+        raise ValueError('unsupported native owner schema')
+    hashes(value,'policy_sha256 opening_sha256 journal_sha256')
+    for key in ('journal_device','journal_inode'):number(value,key,2**64-1)
+    number(value,'journal_bytes',MAX_BYTES)
+    for key in ('charged_sat','remaining_total_sat','urgent_remaining_sat','discretionary_remaining_sat',
+                'direct_attempt_count','direct_reserved_sat','funding_reserved_sat','round_reserved_sat',
+                'pool_reserved_sat','urgent_reserved_sat'):number(value,key)
+    policy=value['policy']
+    fields(policy,'urgent_reserve_sat ordinary_budget_sat external_future_reserved_sat opening_sha256')
+    for key in ('urgent_reserve_sat','ordinary_budget_sat','external_future_reserved_sat'):number(policy,key)
+    hashes(policy,'opening_sha256',nullable=True)
+    opening=value['opening']
+    fields(opening,'version network genesis server_pubkey history_prefix_bytes history_prefix_sha256 native_spent_sat external_spent_sat accounting_receipt_sha256')
+    if type(opening['version'])is not int or opening['version']!=1 or opening['network']!='signet':
+        raise ValueError('unsupported native owner opening')
+    hashes(opening,'genesis history_prefix_sha256')
+    hashes(opening,'accounting_receipt_sha256',nullable=True)
+    if not isinstance(opening['server_pubkey'],str)or not re.fullmatch('(02|03)[0-9a-f]{64}',opening['server_pubkey']):
+        raise ValueError('invalid native owner server key')
+    number(opening,'history_prefix_bytes',650000)
+    for key in ('native_spent_sat','external_spent_sat'):number(opening,key)
+    for key in ('funding','urgent','resolutions'):
+        if not isinstance(value[key],list)or len(value[key])>4096:
+            raise ValueError('native owner complete row bound')
+    for row in value['funding']:
+        fields(row,'index purpose family_sha256 generation unsigned_body_sha256 prevouts_sha256 txid signed_wtxid ceiling_sat')
+        number(row,'index',2**64-1);number(row,'generation',2**32-1);number(row,'ceiling_sat')
+        if row['purpose']not in ('round','pool'):raise ValueError('unknown native funding purpose')
+        hashes(row,'family_sha256 unsigned_body_sha256 prevouts_sha256 txid')
+        hashes(row,'signed_wtxid',nullable=True)
+    for row in value['urgent']:
+        fields(row,'index ceiling_sat source_binding_sha256 transactions')
+        number(row,'index',2**64-1);number(row,'ceiling_sat')
+        hashes(row,'source_binding_sha256',nullable=True)
+        if not isinstance(row['transactions'],list)or len(row['transactions'])>2:
+            raise ValueError('native urgent public member bound')
+        for tx in row['transactions']:
+            fields(tx,'txid wtxid');hashes(tx,'txid wtxid')
+    for row in value['resolutions']:
+        fields(row,'winner_index block_height block_hash')
+        number(row,'winner_index',2**64-1);number(row,'block_height',2**32-1)
+        hashes(row,'block_hash')
+    return value
+
+
+def native_fee_owner_snapshot():
+    """One fixed read-only owning-daemon RPC; private evidence stays separate."""
+    global READ_DEADLINE
+    previous=READ_DEADLINE;READ_DEADLINE=time.monotonic()+15;started=time.time()
+    try:
+        _,container,address=WALLET_SOURCES['watchman']
+        raw=run(['sudo','-n','docker','exec',container,'captaind','rpc','--addr',address,'native-fee-budget'],timeout=12)
+        result=public_native_fee_snapshot(raw)
+        return {'kind':'native_fee_owner_snapshot','source_scope':'public_native_owning_fee_projection',
+            'schema_version':1,'owner_snapshot':result,
+            'rpc_response_sha256':hashlib.sha256(raw.encode()).hexdigest(),
+            'observed_at':started,'completed_at':time.time(),'complete':False,'qualified':False,
+            'validation_scope':'exact public owning-daemon schema only; loaded process/FLOCK custody, fresh private SQL/publication joins, current chain/wallet and full accounting still require independent proof'}
+    finally:READ_DEADLINE=previous
+
+
 def native_ordinary_fee_budget():
     """Public disk facts only; never invokes the native budget loader/signers."""
     global READ_DEADLINE
@@ -634,6 +721,7 @@ def native_ordinary_fee_budget():
     finally:READ_DEADLINE=previous
 
 def collect(kind,after):
+    if kind=='native_fee_owner_snapshot':return native_fee_owner_snapshot()
     if kind=='native_ordinary_fee_budget':return native_ordinary_fee_budget()
     if kind=='closed_frontier':return closed_frontier()
     if kind=='direct_journal':return direct_journal()
