@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "scope": "Exact deployed read-only observer repair, not financial implementation or deployment qualification",
+  "observer_sha256": "20c44ba74b57cdea155f00c1ce1b55e395dafcbab04899de6417e43dfffa6f8e",
+  "dependencies": {
+    "__init__.py": "98bef9de9dff5ea64382b9788a148b32cd6f2bb140ba620f105b357ff0c94971",
+    "bip39-english.txt": "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda",
+    "bundle_audit.py": "b398e53b7cc8a145fb4fe534ba1a62664cab936396dd88d6a48a441b31e2e3de",
+    "model.py": "8574055927dda49096b169a0a0ff54b7da30a5a5d458173edaa2770b778e05c7",
+    "private_transaction_projection.py": "f2634865df3189f05b6e2a5d1fde1a7864d0a762131c83032cf2b3f7fbcfc62a"
+  },
+  "previous_observer_sha256": "59200e4237c79a8d1fe9a43376700df104070815bf6d037281fe78759e69b8c8",
+  "actual_nonempty_projection": "PASS: confirmed sweep receipt, original signed weight824WU, witness excluded",
+  "independent_restricted_bridge": "PASS: exit0, nonempty receipt, stable chain and runtime",
+  "service_restarts": 0,
+  "financial_mutations": 0,
+  "private_receipt_hashes": {
+    "root_actual_observer_result": "564f2d64960f27c0d0fc537994ff63fa095cb9734cfec60961fcc7cfb2230a5c",
+    "independent_sim_bridge": "d2a4182a861d0d0ec8edd7f7507bc56c906f1daa91a8b886ea644523613c3347"
+  }
+}
