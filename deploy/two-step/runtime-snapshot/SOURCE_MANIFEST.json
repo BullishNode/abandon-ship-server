@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source_key": "de9897024bb4b4a534ce359fa1e523104e47207ed6cef022e6b3c2b1299296d7",
+  "source_key_encoding": "sha256 canonical sorted compact JSON components",
+  "source_key_scope": "Mixed image composition; not one shared source revision",
+  "server_source_commit": "9a9334d6a18bfcd7a371a10a6fe85ce985dacf97",
+  "server_source_key": "0440f31756ee5da2e2ba796d200e0f6a120c9f2f7f16a544e681b497c23d0744",
+  "retained_client_source_key": "ba9451d2aac67e0aed930946e9b3a17d64b62c9f497d6e525d46eeded20971c1",
+  "components": {
+    "captaind": {
+      "sha256": "86362ac8d79d162c66b7724c00a68c9b960129bcd0bc0de176a7b8c4d70e6088",
+      "source_commit": "9a9334d6a18bfcd7a371a10a6fe85ce985dacf97",
+      "source_key": "0440f31756ee5da2e2ba796d200e0f6a120c9f2f7f16a544e681b497c23d0744"
+    },
+    "watchmand": {
+      "sha256": "5974ea427ff0033a5f5bb5290866a46bc4a2f5a3469de4d81ca4c3caf4d7bc77",
+      "source_commit": "9a9334d6a18bfcd7a371a10a6fe85ce985dacf97",
+      "source_key": "0440f31756ee5da2e2ba796d200e0f6a120c9f2f7f16a544e681b497c23d0744"
+    },
+    "bark": {
+      "sha256": "7c79f757d4027809caf6806dfb0c0c527354e39e73417ceb84a213ad43403b4f",
+      "source_key": "ba9451d2aac67e0aed930946e9b3a17d64b62c9f497d6e525d46eeded20971c1",
+      "source_description": "Original frozen3d3b284+37 overlay, unchanged retained DEV"
+    },
+    "barkd": {
+      "sha256": "df8a44d084465bad57b7ae96eb0ca1a3cf234d6e1cd5e078520d9577c1c7d78b",
+      "source_key": "ba9451d2aac67e0aed930946e9b3a17d64b62c9f497d6e525d46eeded20971c1",
+      "source_description": "Original frozen3d3b284+37 overlay, unchanged retained DEV"
+    }
+  },
+  "base_image": "sha256:ef8279e1ffc6d216da8445fef05dbd1963b11a36f7c1c2aa68dd56ad216700a0",
+  "qualification_scope": "Inactive packaging only; full checks and financial cutover admission separate",
+  "active_financial_mounts": false,
+  "runtime_library_path": "/nix/store/k8rbpjlq071djhghgnxm2kcng6h2b035-gcc-15.2.0-libgcc/lib:/nix/store/m07h00fl6538s4gavrp66a20ka4hg7fy-glibc-2.42-67/lib",
+  "runtime_path_reason": "Native ELF RUNPATH points at qualified build output, absent from image; explicit existing Nix public libraries, no binary patch or source change."
+}

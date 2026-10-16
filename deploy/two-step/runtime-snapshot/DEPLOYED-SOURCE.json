@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "observation_utc": "2026-10-16T02:03:05.369000+00:00",
+  "status": "DEPLOYED_SOURCE_PRESERVATION_ONLY",
+  "native_repository": "https://github.com/BullishNode/abandon-ship-bark",
+  "deployed_server_commit": "9a9334d6a18bfcd7a371a10a6fe85ce985dacf97",
+  "image_id": "sha256:089396ec2da23eb35e6cfe0477bc505a21c622c9bbd1e7230dcc2e6115cffe68",
+  "dockerfile_sha256": "50bc76f2bb90a0d5a65b6e93b57335b6bca37c7e5a981d2bc6f60c7157e3b79f",
+  "image_source_manifest_sha256": "af7531bdf618eb07ffa608897a54a33bc013379dcc4d3084908027fc8cf0c799",
+  "retained_client_source": {
+    "original_base": "3d3b28428cd33eb5e703342a8441c1a8d5f4a71b",
+    "source_fingerprint": "ba9451d2aac67e0aed930946e9b3a17d64b62c9f497d6e525d46eeded20971c1",
+    "modified_tracked_files": 28,
+    "additional_source_files": 9,
+    "preserved_branch": "work/a-deployed-sdk37-20261016",
+    "preservation_commit": "031ed17083a36286edd267e7762ea9a4fc627b54",
+    "warning": "Preservation commit reconstructs the original 37-path overlay; it is not a new build or evidence that clean Git base alone produced the deployed clients."
+  },
+  "runtime_shape": {
+    "network": "host",
+    "read_only_root": true,
+    "user": "2001:2001",
+    "workdir": "/var/lib/two-step-a",
+    "cap_drop": [
+      "ALL"
+    ],
+    "security_opt": [
+      "no-new-privileges:true"
+    ],
+    "restart_policy": "no",
+    "tmpfs": "/tmp:rw,nosuid,noexec,size=64m,mode=1777",
+    "private_config_mount": {
+      "source": "/etc/two-step-a",
+      "target": "/etc/two-step-a",
+      "read_only": true
+    },
+    "captaind": {
+      "entrypoint": "/app/captaind",
+      "args": [
+        "--config",
+        "/etc/two-step-a/captaind-enrollment.toml",
+        "start"
+      ],
+      "writable_state": "/var/lib/two-step-a/server"
+    },
+    "watchmand": {
+      "entrypoint": "/app/watchmand",
+      "args": [
+        "--config",
+        "/etc/two-step-a/watchmand.toml",
+        "start"
+      ],
+      "writable_state": "/var/lib/two-step-a/watchmand"
+    },
+    "environment_rule": "Retained deployment copied only PATH, RUST_LOG and HOME from prior containers; private values are not published."
+  },
+  "web_observation": {
+    "own_target_running_web_processes": 0,
+    "own_target_web_containers": 0,
+    "running_image_app_entries": [
+      "SOURCE_MANIFEST.json",
+      "bark",
+      "barkd",
+      "captaind",
+      "watchmand"
+    ],
+    "inspected_static_paths_absent": [
+      "/usr/share/nginx/html",
+      "/var/www",
+      "/srv",
+      "/opt"
+    ],
+    "source_search": "No ServeDir/rust_embed/include_dir/index.html/static_files match in deployed server/src snapshot. This is bounded evidence, not a whole-filesystem or binary-embedding proof.",
+    "candidate_is_not_deployed": "Web work/a-web-core-20261016 at69e3c35 is a candidate; no deployed web revision is claimed."
+  },
+  "private_evidence_hashes": {
+    "fresh_target_static_asset_receipt_sha256": "109fe016817ef93c70aef03f9efc995aa13b1f3e746a31bcadf1385649fa9cee",
+    "original_actual_upgrade_source_sha256": "43c128e279bf9f8b7ec31b8a7ff94d89eaf52485baa5e774b6b4bdfb2ab5850b"
+  },
+  "not_included": [
+    "private configurations, seeds, credentials and financial database contents",
+    "inherited base image layers and compiled ELF payloads",
+    "a complete original Compose file: captaind/watchmand were created by bounded deployment code",
+    "new candidate deployment, qualification or campaign resumption"
+  ]
+}
