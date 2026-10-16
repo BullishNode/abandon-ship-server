@@ -41,6 +41,46 @@ def run(argv, directory, label, timeout=180):
     return (directory / (label + '.stdout')).read_text()
 
 
+def image_hashes(image, directory):
+    # The existing runtime image deliberately has no general-purpose coreutils.
+    # Inspect a newly created, never-started container; no image code runs here.
+    cid = run(['sudo', '-n', 'docker', 'create', '--network=none', '--read-only',
+               '--entrypoint', '/app/captaind', image, '--version'], directory, 'hash-container-create').strip()
+    if not re.fullmatch('[0-9a-f]{64}', cid):
+        raise ValueError('new inspection container identity unavailable')
+    hashes = {}
+    try:
+        for name in BINS:
+            argv = ['sudo', '-n', 'docker', 'cp', cid + ':/app/' + name, '-']
+            with (directory / ('image-copy-' + name + '.stderr')).open('xb') as err:
+                process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=err)
+                try:
+                    count = 0
+                    with tarfile.open(fileobj=process.stdout, mode='r|') as archive:
+                        for entry in archive:
+                            if (not entry.isfile() or entry.issym() or entry.islnk()
+                                    or pathlib.PurePosixPath(entry.name).name != name
+                                    or not 0 < entry.size <= 160 * 1024**2 or count):
+                                raise ValueError('image export contains an unexpected executable')
+                            count += 1
+                            h = hashlib.sha256()
+                            with archive.extractfile(entry) as stream:
+                                for chunk in iter(lambda: stream.read(1024**2), b''):
+                                    h.update(chunk)
+                            hashes['/app/' + name] = h.hexdigest()
+                    process.stdout.close()
+                    if process.wait(timeout=30) or count != 1:
+                        raise ValueError('image executable export failed')
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+        (directory / 'image-executable-hashes.json').write_text(json.dumps(hashes, indent=2) + '\n')
+        return hashes
+    finally:
+        run(['sudo', '-n', 'docker', 'rm', cid], directory, 'hash-container-remove')
+
+
 def main():
     if len(sys.argv) != 3:
         raise ValueError('provide exact declaration file and its SHA256')
@@ -122,9 +162,8 @@ def main():
         raise ValueError('actual image identity unavailable')
     sandbox = ['sudo', '-n', 'docker', 'run', '--rm', '--network=none', '--read-only', '--cap-drop=ALL',
                '--security-opt=no-new-privileges', '--pids-limit=32', '--memory=256m', '--cpus=1']
-    hashes = run(sandbox + ['--entrypoint', '/usr/bin/sha256sum', image] + ['/app/' + n for n in BINS],
-                 directory, 'image-executable-hashes')
-    if {line.split()[1]: line.split()[0] for line in hashes.splitlines()} != {
+    hashes = image_hashes(image, directory)
+    if hashes != {
             '/app/' + n: artifacts[n]['sha256'] for n in BINS}:
         raise ValueError('actual image executable identities differ')
     for name in BINS:
