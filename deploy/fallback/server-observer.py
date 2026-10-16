@@ -44,7 +44,7 @@ def request(raw):
     if len(raw)>4096:raise ValueError('request bound exceeded')
     value=json.loads(raw)
     if not isinstance(value,dict):raise ValueError('invalid bridge request')
-    if value.get('kind') in {'financial_readiness','claimant_inventory','direct_journal','closed_frontier'}:
+    if value.get('kind') in {'financial_readiness','claimant_inventory','direct_journal','closed_frontier','native_ordinary_fee_budget'}:
         if set(value)!={'kind'}:raise ValueError('financial operation takes no arguments')
         return value['kind'],None
     if value.get('kind')=='rounds_descriptor':
@@ -602,7 +602,44 @@ def financial_readiness():
     try:return _financial_readiness()
     finally:READ_DEADLINE=previous
 
+def native_ordinary_fee_budget():
+    """Public disk facts only; never invokes the native budget loader/signers."""
+    global READ_DEADLINE
+    previous=READ_DEADLINE;READ_DEADLINE=time.monotonic()+20
+    try:
+        mounts=json.loads(run(['sudo','-n','docker','inspect','--format','{{json .Mounts}}',CONTAINER]))
+        if not isinstance(mounts,list) or len(mounts)>32 or any(not isinstance(m,dict) for m in mounts):
+            raise ValueError('bounded captaind mount inventory required')
+        matches=[m for m in mounts if m.get('Destination')=='/data/captaind']
+        expected='/var/lib/docker/volumes/abandon-signet-fallback_captaind/_data'
+        if len(matches)!=1 or any(matches[0].get(key)!=value for key,value in
+                {'Type':'volume','Name':'abandon-signet-fallback_captaind','Source':expected,'RW':True}.items()):
+            raise ValueError('fixed owned captaind data volume required')
+        raw=run(['sudo','-n','/usr/bin/python3','-I','/opt/abandon-simulation/native-budget-observation.py'])
+        if len(raw.encode())>16384:raise ValueError('native budget projection bound')
+        result=json.loads(raw)
+        if not isinstance(result,dict) or result.get('source_scope')!='public_native_disk_budget_observation':
+            raise ValueError('invalid native disk projection')
+        # The installed reader has a closed public schema; reject added fields,
+        # including accidental raw history/config data, before returning bytes.
+        fields={'schema_version','source_scope','policy_sha256','opening_sha256','budget_file_sha256',
+            'budget_file_bytes','network','genesis','server_pubkey','ordinary_budget_sat','urgent_reserve_sat',
+            'external_future_reserved_sat','opening_native_spent_sat','opening_external_spent_sat',
+            'history_prefix_bytes','history_prefix_sha256','accounting_receipt_sha256','opening_charge_sat',
+            'reserved_ceiling_sum_sat','attempt_count','total_charged_sat','remaining_ordinary_allowance_sat',
+            'runtime_loaded_identity_verified','retained_signed_fee_coverage_verified',
+            'urgent_selection_isolation_verified','complete','qualified','observed_at','completed_at'}
+        if set(result)!=fields or any(result[name]is not False for name in
+                ('runtime_loaded_identity_verified','retained_signed_fee_coverage_verified',
+                 'urgent_selection_isolation_verified','complete','qualified')):
+            raise ValueError('native disk projection scope changed')
+        return {'kind':'native_ordinary_fee_budget','disk_budget':result,
+            'whole_input_urgent_eligible_cash_sat':None,'complete':False,'qualified':False,
+            'validation_scope':'fixed public disk budget snapshot only; join the separate owning watchman wallet/Core observation for whole confirmed unlocked inputs; actual selected-input exclusion and loaded signed-history coverage remain required'}
+    finally:READ_DEADLINE=previous
+
 def collect(kind,after):
+    if kind=='native_ordinary_fee_budget':return native_ordinary_fee_budget()
     if kind=='closed_frontier':return closed_frontier()
     if kind=='direct_journal':return direct_journal()
     if kind=='claimant_inventory':return claimant_inventory()
