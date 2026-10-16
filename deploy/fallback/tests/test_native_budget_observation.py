@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -95,14 +96,28 @@ class NativeBudgetObservation(unittest.TestCase):
     def test_operation_has_no_caller_paths_or_arguments(self):
         self.assertEqual(bridge.request('{"kind":"native_ordinary_fee_budget"}'),('native_ordinary_fee_budget',None))
         with self.assertRaises(ValueError):bridge.request('{"kind":"native_ordinary_fee_budget","path":"/elsewhere"}')
-    def test_bridge_rejects_wrong_mount_without_helper_call(self):
-        with patch.object(bridge,'run',return_value='[]')as operation,self.assertRaises(ValueError):bridge.native_ordinary_fee_budget()
-        self.assertEqual(operation.call_count,1)
+    def test_fixed_root_helper_accepts_actual_owned_bind_and_named_volume(self):
+        for mount in ({'Destination':'/data/captaind','Type':'bind','Source':str(reader.OWNED_PARENT/'artifacts/existing/data/captaind'),'RW':True},
+                      {'Destination':'/data/captaind','Type':'volume','Name':'abandon-signet-fallback_captaind','Source':'/var/lib/docker/volumes/abandon-signet-fallback_captaind/_data','RW':True}):
+            raw=json.dumps({'container_id':'a'*64,'mounts':[mount]}).encode()
+            with patch.object(reader.subprocess,'run',return_value=subprocess.CompletedProcess([],0,raw))as command:
+                directory,binding=reader.source_mount()
+            self.assertEqual(str(directory),mount['Source']+'/direct-expiry-witness')
+            self.assertEqual(command.call_args.args[0][:3],['/usr/bin/docker','--host','unix:///var/run/docker.sock'])
+            self.assertNotIn('DOCKER_HOST',command.call_args.kwargs['env'])
+    def test_wrong_missing_duplicate_or_shadow_mount_refuses(self):
+        good={'Destination':'/data/captaind','Type':'bind','Source':str(reader.OWNED_PARENT/'artifacts/existing/data/captaind'),'RW':True}
+        for mounts in ([],[good,good],[{**good,'RW':False}],[{**good,'Source':'/etc/captaind'}],
+                       [good,{'Destination':'/data/captaind/direct-expiry-witness','Type':'bind','Source':'/elsewhere','RW':True}],
+                       [{**good,'Source':str(reader.OWNED_PARENT/'../other/captaind')}],
+                       [{**good,'Type':'volume','Name':'other'}]):
+            raw=json.dumps({'container_id':'a'*64,'mounts':mounts}).encode()
+            with patch.object(reader.subprocess,'run',return_value=subprocess.CompletedProcess([],0,raw)),self.assertRaises(ValueError):reader.source_mount()
     def test_bridge_fixed_projection_never_claims_urgent_readiness(self):
-        facts=reader.project(source());facts.update(observed_at=1.0,completed_at=2.0)
+        facts=reader.project(source());facts.update(observed_at=1.0,completed_at=2.0,source_mount_identity_sha256="5"*64)
         mounts=[{'Destination':'/data/captaind','Type':'volume','Name':'abandon-signet-fallback_captaind',
             'Source':'/var/lib/docker/volumes/abandon-signet-fallback_captaind/_data','RW':True}]
-        with patch.object(bridge,'run',side_effect=[json.dumps(mounts),json.dumps(facts)])as operation:
+        with patch.object(bridge,'run',return_value=json.dumps(facts))as operation:
             result=bridge.native_ordinary_fee_budget()
         self.assertEqual(operation.call_args.args[0],['sudo','-n','/usr/bin/python3','-I','/opt/abandon-simulation/native-budget-observation.py'])
         self.assertIsNone(result['whole_input_urgent_eligible_cash_sat']);self.assertFalse(result['qualified'])
@@ -110,7 +125,7 @@ class NativeBudgetObservation(unittest.TestCase):
         mounts=[{'Destination':'/data/captaind','Type':'volume','Name':'abandon-signet-fallback_captaind',
             'Source':'/var/lib/docker/volumes/abandon-signet-fallback_captaind/_data','RW':True}]
         for alteration in ({'private_history':'redacted'},{'qualified':True}):
-            facts=reader.project(source());facts.update(observed_at=1.0,completed_at=2.0);facts.update(alteration)
-            with patch.object(bridge,'run',side_effect=[json.dumps(mounts),json.dumps(facts)]),self.assertRaises(ValueError):bridge.native_ordinary_fee_budget()
+            facts=reader.project(source());facts.update(observed_at=1.0,completed_at=2.0,source_mount_identity_sha256="5"*64);facts.update(alteration)
+            with patch.object(bridge,'run',return_value=json.dumps(facts)),self.assertRaises(ValueError):bridge.native_ordinary_fee_budget()
 
 if __name__=='__main__':unittest.main()

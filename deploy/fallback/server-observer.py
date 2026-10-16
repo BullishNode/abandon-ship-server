@@ -607,14 +607,6 @@ def native_ordinary_fee_budget():
     global READ_DEADLINE
     previous=READ_DEADLINE;READ_DEADLINE=time.monotonic()+20
     try:
-        mounts=json.loads(run(['sudo','-n','docker','inspect','--format','{{json .Mounts}}',CONTAINER]))
-        if not isinstance(mounts,list) or len(mounts)>32 or any(not isinstance(m,dict) for m in mounts):
-            raise ValueError('bounded captaind mount inventory required')
-        matches=[m for m in mounts if m.get('Destination')=='/data/captaind']
-        expected='/var/lib/docker/volumes/abandon-signet-fallback_captaind/_data'
-        if len(matches)!=1 or any(matches[0].get(key)!=value for key,value in
-                {'Type':'volume','Name':'abandon-signet-fallback_captaind','Source':expected,'RW':True}.items()):
-            raise ValueError('fixed owned captaind data volume required')
         raw=run(['sudo','-n','/usr/bin/python3','-I','/opt/abandon-simulation/native-budget-observation.py'])
         if len(raw.encode())>16384:raise ValueError('native budget projection bound')
         result=json.loads(raw)
@@ -628,11 +620,12 @@ def native_ordinary_fee_budget():
             'history_prefix_bytes','history_prefix_sha256','accounting_receipt_sha256','opening_charge_sat',
             'reserved_ceiling_sum_sat','attempt_count','total_charged_sat','remaining_ordinary_allowance_sat',
             'runtime_loaded_identity_verified','retained_signed_fee_coverage_verified',
-            'urgent_selection_isolation_verified','complete','qualified','observed_at','completed_at'}
+            'urgent_selection_isolation_verified','complete','qualified','observed_at','completed_at','source_mount_identity_sha256'}
         if set(result)!=fields or any(result[name]is not False for name in
                 ('runtime_loaded_identity_verified','retained_signed_fee_coverage_verified',
                  'urgent_selection_isolation_verified','complete','qualified')):
             raise ValueError('native disk projection scope changed')
+        if not isinstance(result['source_mount_identity_sha256'],str)or not re.fullmatch('[0-9a-f]{64}',result['source_mount_identity_sha256']):raise ValueError('native source mount identity missing')
         return {'kind':'native_ordinary_fee_budget','disk_budget':result,
             'whole_input_urgent_eligible_cash_sat':None,'complete':False,'qualified':False,
             'validation_scope':'fixed public disk budget snapshot only; join the separate owning watchman wallet/Core observation for whole confirmed unlocked inputs; actual selected-input exclusion and loaded signed-history coverage remain required'}

@@ -8,12 +8,19 @@ be checked before installation. Track A owns the shared normal collector;
 this contribution does not edit the common collector or simulator ledger.
 
 The fixed request is `{"kind":"native_ordinary_fee_budget"}`. Extra arguments
-are refused. The bridge checks the actual captaind data mount against the owned
-named volume, then invokes the fixed root-owned reader at
+are refused. The bridge invokes the fixed root-owned reader at
 `/opt/abandon-simulation/native-budget-observation.py`, with isolated Python and
 no arguments. Installation requires the bridge, helper and restricted sudo
 rule to be reviewed and installed together by the Track B operator. No generic
 privileged Python invocation should be granted to the observer account.
+
+The reader inspects only the fixed own cap container through the local Docker
+Unix socket, bounds its mount inventory, and accepts the exact named volume or
+a canonical captaind bind beneath the owned deployment parent. It rejects
+nested mounts and rechecks container/mount identity after reading. No caller
+selects a path, container or RPC. The source binding is returned as a hash.
+The initial default-volume assumption refused the real target bind before any
+installation; this measured child supports the actual owned deployment.
 
 The helper reads only `ordinary-fee-policy.json`, `ordinary-fee-opening.json`
 and `ordinary-fee-budget` beneath the fixed direct-expiry witness directory.

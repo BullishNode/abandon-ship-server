@@ -1,11 +1,37 @@
 #!/usr/bin/env python3
 """Fixed public disk projection; never loads/locks/initializes a native budget."""
-import hashlib,json,os,re,stat,sys,time
+import hashlib,json,os,re,stat,subprocess,sys,time
 from pathlib import Path
 
-DIRECTORY=Path('/var/lib/docker/volumes/abandon-signet-fallback_captaind/_data/direct-expiry-witness')
+CONTAINER='abandon-signet-fallback-fb-captaind-1'
+OWNED_PARENT=Path('/home/ubuntu/abandon-signet-fallback')
 LIMITS={'ordinary-fee-policy.json':2048,'ordinary-fee-opening.json':2048,'ordinary-fee-budget':2*1024*1024}
 MAX_MONEY=21_000_000*100_000_000
+
+def source_mount():
+    command=['/usr/bin/docker','--host','unix:///var/run/docker.sock','inspect','--format',
+        '{"container_id":{{json .Id}},"mounts":{{json .Mounts}}}',CONTAINER]
+    raw=subprocess.run(command,capture_output=True,timeout=4,check=True,
+        env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin'}).stdout
+    if len(raw)>32768:raise ValueError('owned mount response bound')
+    value=json.loads(raw);mounts=value['mounts']
+    if not isinstance(value.get('container_id'),str)or not re.fullmatch('[0-9a-f]{64}',value['container_id']):raise ValueError('owned container identity required')
+    if not isinstance(mounts,list)or len(mounts)>32 or any(not isinstance(m,dict)for m in mounts):raise ValueError('owned mount inventory bound')
+    matches=[m for m in mounts if m.get('Destination')=='/data/captaind']
+    if len(matches)!=1 or matches[0].get('RW')is not True:raise ValueError('one writable owning cap data mount required')
+    mount=matches[0];source=mount.get('Source')
+    if not isinstance(source,str)or len(source)>4096:raise ValueError('bounded owned source required')
+    path=Path(source)
+    if not path.is_absolute()or str(path)!=source or '..'in path.parts:raise ValueError('canonical owned source required')
+    if mount.get('Type')=='bind':
+        if not path.is_relative_to(OWNED_PARENT)or path.name!='captaind':raise ValueError('bind source outside owned cap data')
+    elif mount.get('Type')=='volume':
+        if mount.get('Name')!='abandon-signet-fallback_captaind'or source!='/var/lib/docker/volumes/abandon-signet-fallback_captaind/_data':raise ValueError('unrecognized owning cap volume')
+    else:raise ValueError('unsupported owning cap mount')
+    if any(isinstance(m.get('Destination'),str)and m['Destination'].startswith('/data/captaind/')for m in mounts):
+        raise ValueError('nested data mount could shadow native history')
+    binding={'container_id':value['container_id'],'type':mount['Type'],'source':source,'destination':'/data/captaind','read_write':True}
+    return path/'direct-expiry-witness',binding
 
 
 def amount(value,positive=False):
@@ -116,7 +142,9 @@ def read_directory(path):
 
 def main():
     if len(sys.argv)!=1:raise ValueError('fixed observation accepts no arguments')
-    started=time.time();value=read_directory(DIRECTORY)
+    started=time.time();directory,binding=source_mount();value=read_directory(directory)
+    if source_mount()!=(directory,binding):raise ValueError('owned mount changed during budget read')
+    value['source_mount_identity_sha256']=hashlib.sha256(json.dumps(binding,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     value.update(observed_at=started,completed_at=time.time())
     encoded=json.dumps(value,allow_nan=False)
     if len(encoded.encode())>16384:raise ValueError('native public projection bound')
@@ -125,5 +153,5 @@ def main():
 
 if __name__=='__main__':
     try:main()
-    except (ValueError,OSError,UnicodeError,TypeError,KeyError):
+    except (ValueError,OSError,UnicodeError,TypeError,KeyError,subprocess.SubprocessError):
         print('native budget disk observation unavailable',file=sys.stderr);sys.exit(2)
